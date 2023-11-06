@@ -3,10 +3,13 @@ blades: # versions are handled dynamicly
     blade: orchestrator
     managed: true
     static_cluster_parameters:
+      monitor_interval_in_seconds: 10
+      github_tags_cache_max_age_in_seconds: 60
       scrapers:
         - exorde-labs/rss007d0675444aa13fc
+        - exorde-labs/exorde-scraping-module
     host: 127.0.0.1
-    port: 8080
+    port: 8000
     venv: "./venvs/orchestrator"
 
   - name: spotting
@@ -15,7 +18,7 @@ blades: # versions are handled dynamicly
     static_cluster_parameters:
       main_address: 0x0C3d8B32e22fe3714372608218b98D8b11Ae49dd 
     host: 127.0.0.1
-    port: 8081
+    port: 8001
     venv: "./venvs/spotting"
 
   - name: scraper_one

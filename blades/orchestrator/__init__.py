@@ -31,72 +31,22 @@ import json
 
 
 """
-# Orchestrator algorithm in pseudo-code:
+# Intents.
 
-    - monitor
-        - is craper on correct configuration ?
-            - if not , is it running ?
-                - stop it
-            - configure the scraper
-            - start it
-
-
-The scraper jobs is then to push it's data to a spotting module so we never
-receive any data here.
-
-note: start / stop are not process controls but interface controls which are
-defined in scraping.py ; we have a .start and .stop endpoint.
-
-This way we can have different scrapers online that do nothing.
-"""
-
-async def get_github_tags_sorted(repo:str): # {owner}/{repo_id}
-    """This retrieves every tag for a specific module."""
-    async def fetch_json(url:str):
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                response.raise_for_status()
-                return await response.json()
-
-    tags_url = f"https://api.github.com/repos/{repo}/tags"
-    
-    tags = await fetch_json(tags_url)
-    
-    # Parse versions and sort them, / ! \ ignoring any non-semver tags / ! \
-    valid_tags = [tag for tag in tags if not version.parse(tag["name"]).is_prerelease]
-    sorted_tags = sorted(
-        valid_tags,
-        key=lambda tag: version.parse(tag["name"]),
-        reverse=True
-    )
-
-    # Construct the result dictionary with the latest version
-    result = {
-        "module_name": repo_name,
-        "versions": {tag["name"] for tag in sorted_tags},
-        "latest": sorted_tags[0]["name"] if sorted_tags else None
-    }
-    return result
-
-"""
-Design note on Intents.
-
-The system is designed as a configuration rather than instructions. The goal is
+Intents are designed as a configuration rather than instructions. The goal is
 therefor to start, stop, re-configure different modules rather than specificly
 follow each instruction and centralize them.
 
 For example for scrapping the interface design is the following :
-
 """
 @dataclass
 class ScraperIntentParameters:
     """
     note that both scraping modules and blades are versioned and that is because
-    they are different entities due to legacy design ; scraping modules were not
-    initially designed as blades and have their own repository and versions.
+    they are different entities. Scraping modules have their own version and
+    repositories.
 
-    To solve this a KISS approach has been prefered and both are differenciated
-    and handled in the orchestrator.
+    Both are differenciated and handled in the orchestrator differently.
 
     The scraper.py blade therfor contains two versioning systems :
 
@@ -147,21 +97,22 @@ and allow us to re-configure the node at runtime.
 
 """
 
-def scraping_resolver(node) -> Intent:
+def scraping_resolver(blade) -> Intent:
     """
-    Using resolvers we can configure nodes parameters such as keywords, timeout
-    etc... but most importantly the version of modules. The node will be able
+    Using resolvers we can configure blades parameters such as keywords, timeout
+    etc... but most importantly the version of modules. The blade will be able
     to re-install a new version in it's venv and restart*.
 
     *not a container-stop but a process-stop 
     """
     return Intent(
-        host='{}:{}'.format(node['host'], node['port']),
+        host='{}:{}'.format(blade['host'], blade['port']),
         blade='scraper',
         version='0.1',
         params=ScraperIntentParameters(
             module="exorde-labs/rss007d0675444aa13fc",
             version="0.0.3",
+            target="resolve_to_a_spotting_host",
             keyword="BITCOIN",
             extra_parameters={
 
@@ -169,21 +120,21 @@ def scraping_resolver(node) -> Intent:
         )
     )
 
-def spotting_resolver(node) -> Intent:
+def spotting_resolver(blade) -> Intent:
     """The spotting resolver has no special implementation on static top"""
     return Intent(
         blade='spotting', # we never change a blade's behavior in static top
         version='0.1',
-        host='{}:{}'.format(node['host'], node['port']),
+        host='{}:{}'.format(blade['host'], blade['port']),
         params=SpottingIntentParameters() # does nothing for spotting, maybe pass worker addr
     )
 
-def orchestrator_resolver(node) -> Intent:
+def orchestrator_resolver(blade) -> Intent:
     """The orchestrator resolver has no special implementation on static top"""
     return Intent(
         blade='orchestrator',
         version='0.1',
-        host='{}:{}'.format(node['host'], node['port']),
+        host='{}:{}'.format(blade['host'], blade['port']),
         params=OrchestratorIntentParameters() # does nothing for orch,  NOTE : both need to control
                                                                               # version
     )
@@ -194,7 +145,7 @@ RESOLVERS = {
     'orchestrator': orchestrator_resolver
 }
 
-def monitor(modules) -> list[Intent]:
+def think(app) -> list[Intent]:
     """
     Low Level Note:
 
@@ -234,6 +185,10 @@ def monitor(modules) -> list[Intent]:
             - and have it's specific parameters
 
     """
+    
+    # get the version map (versioning.py)
+
+    # generate intent list
     result: list[Intent] = []
     def resolve(node: dict) -> Intent:
         return RESOLVERS[node['blade']](node)
@@ -241,7 +196,28 @@ def monitor(modules) -> list[Intent]:
     for node in app['topology']['blades']:
         result.append(resolve(node))
     return result
+"""
+# Orchestrator algorithm in pseudo-code:
 
+    - think
+        - what should be correct configuration ?
+            - what are the modules to use ?
+            - what are the parameters to use for those modules ?
+    - monitor
+        - for each blade
+            - is blade on correct configuration ? 
+                - NO
+                    - stop it
+                    - configure the scraper
+                    - start it
+
+note : 
+    start / stop can have different meanings :
+        - process stop (due to update)
+        - software stop (implemented in blade/scraper.py) which does not stop
+            the process
+
+"""
 async def orchestrate(app):
     """
     goal:
@@ -249,41 +225,24 @@ async def orchestrate(app):
             - keyword
             - domain_parameters
     """
+
     while True:
         await asyncio.sleep(1) # to let the servers set up
-        # create an intent map
-        intent = monitor(app['topology']['blades'])
-        # inform the nodes 
-        for intent in intent:
-            print('\t{}'.format(intent))
-            # collect their current status
-            try:
-                async with ClientSession() as session:
-                    async with session.post(
-                        'http://{}/status'.format(intent.host), json=json.dumps(asdict(intent))
-                    ) as response:
-                        response = await response.json()
-                        print('\t\t ->{}'.format(response))
-            except:
-                # if the user add a new client to a running configuration
-                # the node would not be available
-                # this also helps the orchestrator stay alive if a node dies
-                pass
-            print('')
-
-        # reflection & introspection
+        brain_map = think(app)
 
         await asyncio.sleep(app['check_interval'] - 1)
 
-async def start_background_tasks(app):
+async def orchestrator_on_init(app):
+    # start_background_tasks
     app['orchestrate'] = app.loop.create_task(orchestrate(app))
 
-async def cleanup_background_tasks(app):
+async def orchestrator_on_cleanup(app):
     app['orchestrate'].cancel()
     await app['orchestrate']
 
 app = web.Application()
-app.on_startup.append(start_background_tasks)
-app.on_cleanup.append(cleanup_background_tasks)
+app.on_startup.append(orchestrator_on_init)
+app.on_startup.append(version_on_init)
+app.on_cleanup.append(orchestrator_on_cleanup)
 
 app['check_interval'] = 10  # check every 10 seconds

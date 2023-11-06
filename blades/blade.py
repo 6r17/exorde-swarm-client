@@ -39,16 +39,24 @@ async def start_blade(blade, topology):
     app['blade'] = blade
     await web._run_app(app, host=blade['host'], port=blade['port'])
 
-async def static_cluster_parameters(request):
-    """
-    Defined by the user trough the topology yaml configuration file
-    """
-    return web.json_response(request.app['static_cluster_parameters'])
+def app_serializer(obj):
+    # Converts any non-serializable object to its string representation
+    if isinstance(obj, web.Application):
+        # Perform specific serialization for aiohttp web.Application, if needed
+        # For example, return a dict of routes. This is just a placeholder.
+        return {"routes": list(obj.router.routes())}
+    elif callable(obj):
+        # Convert callables to their string representation
+        return f"Callable: {obj.__name__}" if hasattr(obj, '__name__') else "Unnamed callable"
+    else:
+        # Default: convert to string
+        return str(obj)
 
 async def status(request):
     """get only of below function"""
-    return web.json_response(request.app['blade'])
-
+    app_json = json.dumps(dict(request.app), default=app_serializer)
+    print(dict(request.app))
+    return web.Response(text=app_json, content_type='application/json')
 
 async def status_set(request):
     """
@@ -84,10 +92,10 @@ if __name__ == '__main__':
     # Dynamically load the appropriate aiohttp app from the subblade
     mod = __import__(args.blade['blade'], fromlist=['app'])
     app = getattr(mod, 'app')
-    app.router.add_get('/', hello)
+    app['blade'] = args.blade
+    app['topology'] = args.topology
     app.router.add_get('/kill', kill)
-    app.router.add_get('/static', static_cluster_parameters)
-    app.router.add_get('/status', status)
+    app.router.add_get('/', status)
     app.router.add_post('/status', status_set)
 
     asyncio.run(start_blade(args.blade, args.topology))
