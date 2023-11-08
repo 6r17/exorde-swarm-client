@@ -28,6 +28,7 @@ from aiohttp import web, ClientSession
 from dataclasses import dataclass, asdict
 from typing import Union
 import json
+import random
 
 from .versioning import versioning_on_init, RepositoryVersion
 
@@ -98,7 +99,15 @@ and allow us to re-configure the node at runtime.
 
 """
 
-def scraping_resolver(blade, capabilities: dict[str, str]) -> Intent:
+def get_blades_location(topology, blade_type: str) -> list[str]:
+    """return a list hosts that match blade_type"""
+    result = []
+    for blade in topology['blades']:
+        if blade['blade'] == blade_type:
+            result.append('{}:{}'.format(blade['host'], blade['port']))
+    return result
+
+def scraping_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
     """
     Using resolvers we can configure blades parameters such as keywords, timeout
     etc... but most importantly the version of modules. The blade will be able
@@ -114,7 +123,7 @@ def scraping_resolver(blade, capabilities: dict[str, str]) -> Intent:
         params=ScraperIntentParameters(
             module=module,
             version=capabilities[module],
-            target="resolve_to_a_spotting_host",
+            target=random.choice(get_blades_location(topology, 'spotting')),
             keyword="BITCOIN",
             extra_parameters={
 
@@ -122,7 +131,7 @@ def scraping_resolver(blade, capabilities: dict[str, str]) -> Intent:
         )
     )
 
-def spotting_resolver(blade, capabilities: dict[str, str]) -> Intent:
+def spotting_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
     """The spotting resolver has no special implementation on static top"""
     return Intent(
         blade='spotting', # we never change a blade's behavior in static top
@@ -131,7 +140,7 @@ def spotting_resolver(blade, capabilities: dict[str, str]) -> Intent:
         params=SpottingIntentParameters() # does nothing for spotting, maybe pass worker addr
     )
 
-def orchestrator_resolver(blade, capabilities: dict[str, str]) -> Intent:
+def orchestrator_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
     """The orchestrator resolver has no special implementation on static top"""
     return Intent(
         blade='orchestrator',
@@ -197,7 +206,7 @@ async def think(app) -> list[Intent]:
     # generate intent list
     result: list[Intent] = []
     def resolve(node: dict) -> Intent:
-        return RESOLVERS[node['blade']](node, capabilities)
+        return RESOLVERS[node['blade']](node, capabilities, app['topology'])
 
     for node in app['topology']['blades']:
         result.append(resolve(node))
@@ -222,8 +231,13 @@ note :
         - process stop (due to update)
         - software stop (implemented in blade/scraper.py) which does not stop
             the process
-
 """
+
+async def commit_intent(intent: Intent):
+    async with ClientSession() as session:
+        async with session.post('http://' + intent.host, json=asdict(intent)) as response:
+            return response
+
 async def orchestrate(app):
     """
     goal:
@@ -234,8 +248,10 @@ async def orchestrate(app):
 
     while True:
         await asyncio.sleep(1) # to let the servers set up
-        intent_map = await think(app)
-        print(intent_map)
+        intent_vector = await think(app)
+        feedback_vector = await asyncio.gather(
+            *[commit_intent(intent) for intent in intent_vector]
+        )
         await asyncio.sleep(app['check_interval'] - 1)
 
 async def orchestrator_on_init(app):

@@ -12,7 +12,10 @@ import sys
 class Scraper:
     def __init__(self):
         self.is_active = False  # Controls whether the scraper is active or not
-    
+   
+    def load_intent(self, intent):
+        print(intent)
+
     async def start_scraping(self):
         self.is_active = True
         async for data in self.data_generator():
@@ -53,30 +56,23 @@ def stop_scraping(request):
         request.app['scraper'].stop_scraping()
 
 
-async def start(request):
+async def start_scraping(request):
     # Create a task for the scraper to run in the background
     request.app['scraper_task'] = asyncio.create_task(
         request.app['scraper'].start_scraping()
     )
-    return web.Response(text="Scraper started")
 
-
-async def stop(request):
-    stop_scraping(request)
-    return web.Response(text="Scraper stopped")
-
-
-async def status_set(request):
+async def load_intent(request):
     """
-    used by blade.py on status_set (basicly a super)
+    used by blade.py on load_intent (basicly a super)
 
-    This should make sure that the current consumer is an instance of the 
-    correct module and version
+    this is used to manage the versioning of scraping modules
     """
-    details = await request.json()
+    intent = await request.json()
+    request.app['scraper'].load_intent(intent)
     print('super status set {}'.format(details))
     return web.json_response(request.app['node'])
 
 app = web.Application()
 app['scraper'] = Scraper()
-app['status_set'] = status_set
+app['load_intent'] = load_intent

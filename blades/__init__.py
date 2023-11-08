@@ -57,19 +57,17 @@ async def status(request):
     app_json = json.dumps(dict(request.app), default=app_serializer)
     return web.Response(text=app_json, content_type='application/json')
 
-async def status_set(request):
+async def load_intent(request):
     """
-    The status endpoint is used by the orchestrator to inform intent and retrieve
-    status of blade's
-        - type
-        - configuration
-        - status
+    The intent endpoint is used by the orchestrator to inform intent and retrieve
+    feedback from the blade
+    This wrapper is responsible for managing the internal's blade version
     """
     intent = await request.json()
-    if request.app.get('status_set', None):
+    if request.app.get('load_intent', None):
         try:
             # we define the interface using request.app internal dict 
-            return await request.app['status_set'](request)
+            return await request.app['load_intent'](request)
         except:
             pass
     # if there is no overwrite we simply return the blade's status
@@ -95,6 +93,6 @@ if __name__ == '__main__':
     app['topology'] = args.topology
     app.router.add_get('/restart', restart)
     app.router.add_get('/', status)
-    app.router.add_post('/', status_set)
+    app.router.add_post('/', load_intent)
 
     asyncio.run(start_blade(args.blade, args.topology))
