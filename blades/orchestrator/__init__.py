@@ -29,6 +29,7 @@ from dataclasses import dataclass, asdict
 from typing import Union
 import json
 
+from .versioning import versioning_on_init, RepositoryVersion
 
 """
 # Intents.
@@ -97,7 +98,7 @@ and allow us to re-configure the node at runtime.
 
 """
 
-def scraping_resolver(blade) -> Intent:
+def scraping_resolver(blade, capabilities: dict[str, str]) -> Intent:
     """
     Using resolvers we can configure blades parameters such as keywords, timeout
     etc... but most importantly the version of modules. The blade will be able
@@ -105,13 +106,14 @@ def scraping_resolver(blade) -> Intent:
 
     *not a container-stop but a process-stop 
     """
+    module = "exorde-labs/rss007d0675444aa13fc"
     return Intent(
         host='{}:{}'.format(blade['host'], blade['port']),
         blade='scraper',
-        version='0.1',
+        version=capabilities['exorde-labs/exorde-swarm-client'],
         params=ScraperIntentParameters(
-            module="exorde-labs/rss007d0675444aa13fc",
-            version="0.0.3",
+            module=module,
+            version=capabilities[module],
             target="resolve_to_a_spotting_host",
             keyword="BITCOIN",
             extra_parameters={
@@ -120,20 +122,20 @@ def scraping_resolver(blade) -> Intent:
         )
     )
 
-def spotting_resolver(blade) -> Intent:
+def spotting_resolver(blade, capabilities: dict[str, str]) -> Intent:
     """The spotting resolver has no special implementation on static top"""
     return Intent(
         blade='spotting', # we never change a blade's behavior in static top
-        version='0.1',
+        version=capabilities['exorde-labs/exorde-swarm-client'],
         host='{}:{}'.format(blade['host'], blade['port']),
         params=SpottingIntentParameters() # does nothing for spotting, maybe pass worker addr
     )
 
-def orchestrator_resolver(blade) -> Intent:
+def orchestrator_resolver(blade, capabilities: dict[str, str]) -> Intent:
     """The orchestrator resolver has no special implementation on static top"""
     return Intent(
         blade='orchestrator',
-        version='0.1',
+        version=capabilities['exorde-labs/exorde-swarm-client'],
         host='{}:{}'.format(blade['host'], blade['port']),
         params=OrchestratorIntentParameters() # does nothing for orch,  NOTE : both need to control
                                                                               # version
@@ -145,7 +147,7 @@ RESOLVERS = {
     'orchestrator': orchestrator_resolver
 }
 
-def think(app) -> list[Intent]:
+async def think(app) -> list[Intent]:
     """
     Low Level Note:
 
@@ -185,23 +187,27 @@ def think(app) -> list[Intent]:
             - and have it's specific parameters
 
     """
-    
     # get the version map (versioning.py)
+    capabilities: list[RepositoryVersiong] = await app['version_manager'].get_latest_valid_tags_for_all_repos()
+    capabilities: dict[str, str] = {
+        repository_versioning.repository_path: repository_versioning.tag_name
+        for repository_versioning in capabilities
+    }
 
     # generate intent list
     result: list[Intent] = []
     def resolve(node: dict) -> Intent:
-        return RESOLVERS[node['blade']](node)
+        return RESOLVERS[node['blade']](node, capabilities)
 
     for node in app['topology']['blades']:
         result.append(resolve(node))
     return result
 """
 # Orchestrator algorithm in pseudo-code:
-
     - think
         - what should be correct configuration ?
             - what are the modules to use ?
+                - [versioning] what are available modules to be used ?
             - what are the parameters to use for those modules ?
     - monitor
         - for each blade
@@ -228,8 +234,8 @@ async def orchestrate(app):
 
     while True:
         await asyncio.sleep(1) # to let the servers set up
-        brain_map = think(app)
-
+        intent_map = await think(app)
+        print(intent_map)
         await asyncio.sleep(app['check_interval'] - 1)
 
 async def orchestrator_on_init(app):
@@ -242,7 +248,7 @@ async def orchestrator_on_cleanup(app):
 
 app = web.Application()
 app.on_startup.append(orchestrator_on_init)
-app.on_startup.append(version_on_init)
+app.on_startup.append(versioning_on_init)
 app.on_cleanup.append(orchestrator_on_cleanup)
 
 app['check_interval'] = 10  # check every 10 seconds

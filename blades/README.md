@@ -9,11 +9,9 @@ We can think of them like components parts of the clustered-exorde-client.
 They have a common API defined in blade.py
 
 ```
-    /               -> hello
-    /kill           -> os._exit
-    /parameters     -> static configuration
-    /status         -> orchestrator's configuration
-    /status (post)  -> set configuration
+    /               -> app's serialization (including config & tasks)
+    /restart        -> os._exit
+    /(post)         -> set configuration
 
 ```
 

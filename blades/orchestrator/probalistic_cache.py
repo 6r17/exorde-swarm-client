@@ -138,7 +138,7 @@ trade-offs based on the specific requirements of the system and the tolerance
 for outdated information.
 
 # Probabilistic Use of Stale Data:
-stale data usage is governed by a probabilistic factor to prevent a sudden rush
+Stale data can be governed by a probabilistic factor to prevent a sudden rush
 of requests to update the cache as soon as data expires. This approach can help
 smooth out load spikes by gradually increasing the likelihood that stale data
 will be used as the time since its expiration grows, up to a certain delay

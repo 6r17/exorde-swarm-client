@@ -42,7 +42,7 @@ def ensure_virtualenv(venv_path):
         print(f"Virtual environment already exists at {venv_path}")
 
 def run_blade_server(_config, topology):
-    blade_path = "blades/blade.py"
+    blade_path = "blades/__init__.py"
     if not os.path.exists(blade_path):
         print(f"ERROR: '{blade_path}' does not exist in the current directory.", file=sys.stderr)
         return

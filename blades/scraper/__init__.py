@@ -37,8 +37,10 @@ class Scraper:
         """
         async with ClientSession() as session:
             # Assuming that 'data' is a dictionary that can be turned into JSON
-            async with session.post('http://127.0.0.1:8081/add', json=data) as response:
-                response_data = await response.text()  # Or use response.json() for JSON response
+            async with session.post(
+                'http://127.0.0.1:8081/add', json=data
+            ) as response:
+                response_data = await response.text() 
                 print(f"Status: {response.status}")
                 print(f"Response: {response_data}")
 
@@ -53,7 +55,9 @@ def stop_scraping(request):
 
 async def start(request):
     # Create a task for the scraper to run in the background
-    request.app['scraper_task'] = asyncio.create_task(request.app['scraper'].start_scraping())
+    request.app['scraper_task'] = asyncio.create_task(
+        request.app['scraper'].start_scraping()
+    )
     return web.Response(text="Scraper started")
 
 
@@ -66,8 +70,8 @@ async def status_set(request):
     """
     used by blade.py on status_set (basicly a super)
 
-    This should make sure that the current consumer is an instance of the correct
-    module and version
+    This should make sure that the current consumer is an instance of the 
+    correct module and version
     """
     details = await request.json()
     print('super status set {}'.format(details))

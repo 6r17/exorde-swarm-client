@@ -4,7 +4,13 @@ blades: # versions are handled dynamicly
     managed: true
     static_cluster_parameters:
       monitor_interval_in_seconds: 10
-      github_tags_cache_max_age_in_seconds: 60
+      github_cache_threshold_minutes: 10
+      github_app_id: 423653
+      github_private_key: github.pem
+      database_provider: sqlite
+      db:
+        driver: sqlite
+        database: orchestrator.sqlite
       scrapers:
         - exorde-labs/rss007d0675444aa13fc
         - exorde-labs/exorde-scraping-module
