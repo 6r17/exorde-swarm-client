@@ -29,6 +29,7 @@ from dataclasses import dataclass, asdict
 from typing import Union
 import json
 import random
+import logging
 
 from .versioning import versioning_on_init, RepositoryVersion
 
@@ -235,8 +236,13 @@ note :
 
 async def commit_intent(intent: Intent):
     async with ClientSession() as session:
-        async with session.post('http://' + intent.host, json=asdict(intent)) as response:
-            return response
+        host = 'http://' + intent.host
+        try:
+            async with session.post(host, json=asdict(intent)) as response:
+                return response
+        except:
+            # the blade is non responsive
+            logging.warning('Could not reach {}'.format(host))
 
 async def orchestrate(app):
     """
@@ -248,14 +254,16 @@ async def orchestrate(app):
 
     while True:
         await asyncio.sleep(1) # to let the servers set up
+        logging.info('-orchestrate')
         intent_vector = await think(app)
         feedback_vector = await asyncio.gather(
             *[commit_intent(intent) for intent in intent_vector]
         )
-        await asyncio.sleep(app['check_interval'] - 1)
+        await asyncio.sleep(app['blade']['static_cluster_parameters']['monitor_interval_in_seconds'] - 1)
 
 async def orchestrator_on_init(app):
-    # start_background_tasks
+    # orchestrate is a background task that runs forever
+    logging.info('orchestrator_on_init')
     app['orchestrate'] = app.loop.create_task(orchestrate(app))
 
 async def orchestrator_on_cleanup(app):
@@ -267,4 +275,3 @@ app.on_startup.append(orchestrator_on_init)
 app.on_startup.append(versioning_on_init)
 app.on_cleanup.append(orchestrator_on_cleanup)
 
-app['check_interval'] = 10  # check every 10 seconds

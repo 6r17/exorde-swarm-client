@@ -41,6 +41,8 @@ of truth therfor report and locking out non-working scraping modules should be
 the appropriate behavior of the system in case of such situation.
 
 """
+
+import logging
 import asyncio
 from packaging import version
 import aiohttp
@@ -153,7 +155,7 @@ class VersionManager:
                 );
             ''')
 
-            print('repositories table creation', result, error)
+            logging.info('repositories table creation : {}, {}'.format(result, error))
 
             result, error = await conn.execute('''
                 CREATE TABLE IF NOT EXISTS tags (
@@ -168,7 +170,7 @@ class VersionManager:
                 );
             ''')
 
-            print('tags table creation ->', result, error)
+            logging.info('tags table creation -> {}, {}'.format(result, error))
 
             result, error = await conn.execute('''
                 CREATE TABLE IF NOT EXISTS marks (
@@ -180,7 +182,7 @@ class VersionManager:
                 );
             ''')
 
-            print('marks table creation', result, error)
+            logging.info('marks table creation : {}, {}'.format(result, error))
 
     async def sync(self, cache=True):
         """Synchronize repository tags with online version."""
@@ -247,7 +249,7 @@ class VersionManager:
                     ]
                     inserted_tags.append(tuple(line))
 
-            print(inserted_tags)
+            logging.info(inserted_tags)
             await conn.executemany(
                 'INSERT OR IGNORE INTO tags(repository, name, zipball_url, tarball_url, _commit) VALUES (?, ?, ?, ?, ?)',
                 inserted_tags
@@ -271,7 +273,7 @@ class VersionManager:
             (tag_rows, error) = await conn.query(query, mark_value=Mark.DEFFECTIVE.value)
             if error:
                 # Handle error here
-                print("Error fetching tags:", error)
+                logging.info("Error fetching tags:", error)
                 return []
 
             # Create a dictionary to collect tags per repository path
@@ -321,12 +323,12 @@ class VersionManager:
             )
 
             if tag_error:
-                print(f"Error finding tag to mark: {tag_error}")
+                logging.info(f"Error finding tag to mark: {tag_error}")
                 return
             
             # Check if tag exists
             if not tag_query_result:
-                print(f"No tag found for {repository_path} with name {tag_name}")
+                logging.info(f"No tag found for {repository_path} with name {tag_name}")
                 return
 
             tag_id = tag_query_result[0][0]
@@ -341,9 +343,9 @@ class VersionManager:
             )
 
             if mark_error:
-                print(f"Error marking tag: {mark_error}")
+                logging.info(f"Error marking tag: {mark_error}")
             else:
-                print(f"Tag {tag_name} marked as {mark} for {repository_path}")
+                logging.info(f"Tag {tag_name} marked as {mark} for {repository_path}")
 
     async def delete_mark_from_tag(self, tag_name: str, repository_path: str, mark: Mark):
         """Delete a mark from a tag."""
@@ -359,12 +361,12 @@ class VersionManager:
             )
 
             if tag_error:
-                print(f"Error finding tag to unmark: {tag_error}")
+                logging.info(f"Error finding tag to unmark: {tag_error}")
                 return
 
             # Check if tag exists
             if not tag_query_result:
-                print(f"No tag found for {repository_path} with name {tag_name} to unmark")
+                logging.info(f"No tag found for {repository_path} with name {tag_name} to unmark")
                 return
 
             tag_id = tag_query_result[0][0]
@@ -379,9 +381,9 @@ class VersionManager:
             )
 
             if delete_mark_error:
-                print(f"Error deleting mark from tag: {delete_mark_error}")
+                logging.info(f"Error deleting mark from tag: {delete_mark_error}")
             else:
-                print(f"Mark deleted from tag {tag_name} for repository {repository_path}")
+                logging.info(f"Mark deleted from tag {tag_name} for repository {repository_path}")
 
     async def get_all_repositories(self):
         async with await self.db.connection() as conn:
@@ -395,4 +397,7 @@ async def versioning_on_init(app):
     """Used to start up the version_manager"""
     app['version_manager'] = VersionManager(app['blade'])
     await app['version_manager'].set_up()
-    await app['version_manager'].sync(cache=False)
+    try:
+        await app['version_manager'].sync(cache=False)
+    except:
+        pass

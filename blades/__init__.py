@@ -80,11 +80,18 @@ it here.
 Each blade should be launched using this script.
 """
 
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generic aiohttp server manager")
     parser.add_argument("--blade", type=json.loads, default={}, help="JSON string of blade configuration")
     parser.add_argument("--topology", type=json.loads, default={}, help="JSON string of topology")
     args = parser.parse_args()
+    FORMAT = '{}:{} : %(message)s'.format(
+        args.blade['host'], args.blade['port']
+    )
+    logging.basicConfig(format=FORMAT, level=logging.DEBUG)
+    logging.info('HELLLO')
 
     # Dynamically load the appropriate aiohttp app from the subblade
     mod = __import__(args.blade['blade'], fromlist=['app'])

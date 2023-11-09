@@ -3,7 +3,8 @@ blades: # versions are handled dynamicly
     blade: orchestrator
     managed: true
     static_cluster_parameters:
-      monitor_interval_in_seconds: 10
+      ntfy_at: 6r17
+      monitor_interval_in_seconds: 1
       github_cache_threshold_minutes: 10
       github_app_id: 423653
       github_private_key: github.pem
