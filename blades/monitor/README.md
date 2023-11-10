@@ -19,7 +19,7 @@ defined above but create a more strict definition of how logging is made.
 
 ## State
 
-Each log is a considered a shard is deep merged into a state.
+Each log is a considered a shard and is deep merged into a state.
 
 ```example
 state = { } # init empty
@@ -66,8 +66,10 @@ erase them.
 ## Benchmark goals
 
 - What is the current's client's perf status ? 
-    - How can we count ?
-        - Counter CRDT
+    - Count the number of items collected by
+        - scraper
+        - spoter
+    - Counter number of items sent trough
 
 ### Unit Live Testing
 
