@@ -6,12 +6,15 @@ import subprocess
 import pkg_resources
 import sys
 import os
+import logging
 from importlib import import_module, metadata
 
 
+blade_logger = logging.getLogger('blade')
+
 class Scraper:
     """
-    Scraper.py uses a scraping modules and pushes it's results to as spotting
+    Scraper.py uses a scraping modules and pushes it's results to a spotting
     blade
 
     The scraper is configured using the load_intent endpoint and method.
@@ -75,6 +78,7 @@ class Scraper:
         """
         # {owner}/{path} becomes {path} 
         module = os.path.basename(intent['params']['module'].rstrip("/"))
+        blade_logger.info('loading intent')
         try:
             local_version = metadata.version(module_name)
         except metadata.PackageNotFoundError:
@@ -93,6 +97,7 @@ class Scraper:
                 self.module = import_module(module_name)
 
     async def start_scraping(self): # cannot fail
+        bade_logger.info('Start scraping')
         self.is_active = True
         async for data in self.data_generator():
             if not self.is_active: 
@@ -108,22 +113,32 @@ class Scraper:
             yield data
             await asyncio.sleep(1)
     
-    async def push_data(self, data):
+    async def push_data(self, data): # CANNOT FAIL
         """
-        Pushing data should not be blocking
+        Pushing data should never be blocking
+
+        May propagate unreachable to the orchestrator
+            multiple strategies possibles:
+                - [CHOOSEN] drop de data
+                - [COMPLEX] hold the data until capability 
         """
+        blade_logger.info('pushing data')
         async with ClientSession() as session:
             # Assuming that 'data' is a dictionary that can be turned into JSON
-            async with session.post(
-                'http://127.0.0.1:8081/add', json=data
-            ) as response:
-                response_data = await response.text() 
-                print(f"Status: {response.status}")
-                print(f"Response: {response_data}")
+            try:
+                async with session.post(
+                    'http://127.0.0.1:8081/add', json=data
+                ) as response:
+                    response_data = await response.text() 
+                    blade_logger.info(f"Status: {response.status}")
+                    blade_logger.info(f"Response: {response_data}")
+            except:
+                blade_logger.error('Could not push data')
 
 
 def stop_scraping(request):
     """Cancel the scraper task"""
+    blader_logger.info('stop scraping')
     scraper_task = request.app.get('scraper_task')
     if scraper_task:
         scraper_task.cancel()
@@ -143,8 +158,8 @@ async def load_intent(request):
     this is used to manage the versioning of scraping modules
     """
     intent = await request.json()
+    blade_logger.info('scraper load_intent : {}, {}'.format(intent, request.app['scraper']))
     request.app['scraper'].load_intent(intent)
-    print('super status set {}'.format(details))
     return web.json_response(request.app['node'])
 
 app = web.Application()

@@ -234,6 +234,9 @@ note :
             the process
 """
 
+
+blade_logger = logging.getLogger('blade')
+
 async def commit_intent(intent: Intent):
     async with ClientSession() as session:
         host = 'http://' + intent.host
@@ -242,7 +245,7 @@ async def commit_intent(intent: Intent):
                 return response
         except:
             # the blade is non responsive
-            logging.warning('Could not reach {}'.format(host))
+            blade_logger.warning('Could not reach {}'.format(host))
 
 async def orchestrate(app):
     """
@@ -251,10 +254,9 @@ async def orchestrate(app):
             - keyword
             - domain_parameters
     """
-
     while True:
         await asyncio.sleep(1) # to let the servers set up
-        logging.info('-orchestrate')
+        blade_logger.info('-orchestrate')
         intent_vector = await think(app)
         feedback_vector = await asyncio.gather(
             *[commit_intent(intent) for intent in intent_vector]
@@ -263,7 +265,7 @@ async def orchestrate(app):
 
 async def orchestrator_on_init(app):
     # orchestrate is a background task that runs forever
-    logging.info('orchestrator_on_init')
+    blade_logger.info('orchestrator_on_init')
     app['orchestrate'] = app.loop.create_task(orchestrate(app))
 
 async def orchestrator_on_cleanup(app):

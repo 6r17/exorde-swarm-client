@@ -10,7 +10,6 @@ They have a common API defined in blade.py
 
 ```
     /               -> app's serialization (including config & tasks)
-    /restart        -> os._exit
     /(post)         -> set configuration
 
 ```
@@ -26,6 +25,7 @@ Topology refers to a blade cluster configuration.
 
 
 ## Versioning
+
 Blades have a a versioning api which allows the orchestrator to change it's 
 configuration at runtime. Since orchestator is also a blade it is designed to
 also receive the status call to him-self and act just like one.

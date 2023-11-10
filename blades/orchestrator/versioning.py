@@ -52,6 +52,9 @@ from enum import Enum
 from asyncdb import AsyncDB, AsyncPool
 from typing import Optional
 
+
+logger = logging.getLogger('blade')
+
 class Mark(Enum):
     """
     `mark` is an internal `label` system differenciated from online labels.
@@ -155,7 +158,7 @@ class VersionManager:
                 );
             ''')
 
-            logging.info('repositories table creation : {}, {}'.format(result, error))
+            logger.info('repositories table creation : {}, {}'.format(result, error))
 
             result, error = await conn.execute('''
                 CREATE TABLE IF NOT EXISTS tags (
@@ -170,7 +173,7 @@ class VersionManager:
                 );
             ''')
 
-            logging.info('tags table creation -> {}, {}'.format(result, error))
+            logger.info('tags table creation -> {}, {}'.format(result, error))
 
             result, error = await conn.execute('''
                 CREATE TABLE IF NOT EXISTS marks (
@@ -182,7 +185,7 @@ class VersionManager:
                 );
             ''')
 
-            logging.info('marks table creation : {}, {}'.format(result, error))
+            logger.info('marks table creation : {}, {}'.format(result, error))
 
     async def sync(self, cache=True):
         """Synchronize repository tags with online version."""
@@ -249,7 +252,7 @@ class VersionManager:
                     ]
                     inserted_tags.append(tuple(line))
 
-            logging.info(inserted_tags)
+            logger.info(inserted_tags)
             await conn.executemany(
                 'INSERT OR IGNORE INTO tags(repository, name, zipball_url, tarball_url, _commit) VALUES (?, ?, ?, ?, ?)',
                 inserted_tags
@@ -270,10 +273,12 @@ class VersionManager:
             """
 
             # Execute the query
-            (tag_rows, error) = await conn.query(query, mark_value=Mark.DEFFECTIVE.value)
+            (tag_rows, error) = await conn.query(
+                query, mark_value=Mark.DEFFECTIVE.value
+            )
             if error:
                 # Handle error here
-                logging.info("Error fetching tags:", error)
+                logger.error("Error fetching tags:", error)
                 return []
 
             # Create a dictionary to collect tags per repository path
@@ -323,12 +328,12 @@ class VersionManager:
             )
 
             if tag_error:
-                logging.info(f"Error finding tag to mark: {tag_error}")
+                logger.error(f"Error finding tag to mark: {tag_error}")
                 return
             
             # Check if tag exists
             if not tag_query_result:
-                logging.info(f"No tag found for {repository_path} with name {tag_name}")
+                logger.error(f"No tag found for {repository_path} with name {tag_name}")
                 return
 
             tag_id = tag_query_result[0][0]
@@ -343,9 +348,9 @@ class VersionManager:
             )
 
             if mark_error:
-                logging.info(f"Error marking tag: {mark_error}")
+                logger.error(f"Error marking tag: {mark_error}")
             else:
-                logging.info(f"Tag {tag_name} marked as {mark} for {repository_path}")
+                logger.info(f"Tag {tag_name} marked as {mark} for {repository_path}")
 
     async def delete_mark_from_tag(self, tag_name: str, repository_path: str, mark: Mark):
         """Delete a mark from a tag."""
@@ -361,12 +366,12 @@ class VersionManager:
             )
 
             if tag_error:
-                logging.info(f"Error finding tag to unmark: {tag_error}")
+                logger.error(f"Error finding tag to unmark: {tag_error}")
                 return
 
             # Check if tag exists
             if not tag_query_result:
-                logging.info(f"No tag found for {repository_path} with name {tag_name} to unmark")
+                logger.error(f"No tag found for {repository_path} with name {tag_name} to unmark")
                 return
 
             tag_id = tag_query_result[0][0]
@@ -381,9 +386,9 @@ class VersionManager:
             )
 
             if delete_mark_error:
-                logging.info(f"Error deleting mark from tag: {delete_mark_error}")
+                logger.info(f"Error deleting mark from tag: {delete_mark_error}")
             else:
-                logging.info(f"Mark deleted from tag {tag_name} for repository {repository_path}")
+                logger.info(f"Mark deleted from tag {tag_name} for repository {repository_path}")
 
     async def get_all_repositories(self):
         async with await self.db.connection() as conn:
