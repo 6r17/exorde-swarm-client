@@ -22,7 +22,7 @@ parameters.
     modules and provide a report on it. (not for this PR)
 
 """
-
+import time
 import asyncio
 from aiohttp import web, ClientSession
 from dataclasses import dataclass, asdict
@@ -82,6 +82,7 @@ class Intent:
     """
     Intents are wrapped to contain a host (they always are meant to an entity)
     """
+    id: str # time:host
     host: str # including port
     blade: str # blade to use
     version: str # blade's version
@@ -118,6 +119,7 @@ def scraping_resolver(blade, capabilities: dict[str, str], topology: dict) -> In
     """
     module = "exorde-labs/rss007d0675444aa13fc"
     return Intent(
+        id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
         host='{}:{}'.format(blade['host'], blade['port']),
         blade='scraper',
         version=capabilities['exorde-labs/exorde-swarm-client'],
@@ -135,6 +137,7 @@ def scraping_resolver(blade, capabilities: dict[str, str], topology: dict) -> In
 def spotting_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
     """The spotting resolver has no special implementation on static top"""
     return Intent(
+        id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
         blade='spotting', # we never change a blade's behavior in static top
         version=capabilities['exorde-labs/exorde-swarm-client'],
         host='{}:{}'.format(blade['host'], blade['port']),
@@ -144,6 +147,7 @@ def spotting_resolver(blade, capabilities: dict[str, str], topology: dict) -> In
 def orchestrator_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
     """The orchestrator resolver has no special implementation on static top"""
     return Intent(
+        id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
         blade='orchestrator',
         version=capabilities['exorde-labs/exorde-swarm-client'],
         host='{}:{}'.format(blade['host'], blade['port']),
@@ -157,7 +161,7 @@ RESOLVERS = {
     'orchestrator': orchestrator_resolver
 }
 
-async def think(app) -> list[Intent]:
+async def think(app) -> dict[str, Intent]: # itent.id : intent
     """
     Low Level Note:
 
@@ -199,19 +203,24 @@ async def think(app) -> list[Intent]:
     """
     # get the version map (versioning.py)
     capabilities: list[RepositoryVersiong] = await app['version_manager'].get_latest_valid_tags_for_all_repos()
-    capabilities: dict[str, str] = {
+    capabilities: dict[str, str] = { # path : tag_name
         repository_versioning.repository_path: repository_versioning.tag_name
         for repository_versioning in capabilities
     }
 
     # generate intent list
-    result: list[Intent] = []
+    result: dict[str, Intent] = {} # id : intent
     def resolve(node: dict) -> Intent:
-        return RESOLVERS[node['blade']](node, capabilities, app['topology'])
+        resolver = RESOLVERS.get(node['blade'], None)
+        if resolver:
+            return resolver(node, capabilities, app['topology'])
 
     for node in app['topology']['blades']:
-        result.append(resolve(node))
+        new_intent = resolve(node)
+        if new_intent:
+            result[new_intent.id] = new_intent
     return result
+
 """
 # Orchestrator algorithm in pseudo-code:
     - think
@@ -255,17 +264,24 @@ async def orchestrate(app):
             - domain_parameters
     """
     while True:
-        await asyncio.sleep(1) # to let the servers set up
-        blade_logger.info('-orchestrate')
-        intent_vector = await think(app)
-        feedback_vector = await asyncio.gather(
-            *[commit_intent(intent) for intent in intent_vector]
-        )
-        await asyncio.sleep(app['blade']['static_cluster_parameters']['monitor_interval_in_seconds'] - 1)
+        try:
+            await asyncio.sleep(1) # to let the servers set up
+            indexed_intents = await think(app)
+            blade_logger.info('intent vector initialized', extra={
+                'logtest': { 'intents': indexed_intents }
+            })
+            feedback_vector = await asyncio.gather(
+                *[commit_intent(intent) for intent in indexed_intents]
+            )
+            await asyncio.sleep(
+                app['blade']['static_cluster_parameters']['monitor_interval_in_seconds'] - 1
+            )
+        except Exception as err:
+            blade_logger.exception('An error occured in the orchestrator : {}'.format(err))
+
 
 async def orchestrator_on_init(app):
     # orchestrate is a background task that runs forever
-    blade_logger.info('orchestrator_on_init')
     app['orchestrate'] = app.loop.create_task(orchestrate(app))
 
 async def orchestrator_on_cleanup(app):

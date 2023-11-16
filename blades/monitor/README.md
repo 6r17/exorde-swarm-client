@@ -2,20 +2,22 @@
 
 # Problem
 
-Test and review the behavior of the client at run-time.
+Test the behavior of the client at run-time and alert annomalies.
 
 # Solution
 
-Consumes the logs of the cluster.
+Consumes the logs of the cluster and interpret them.
 
 # Implementation
 
 Traditional logs allow us to read and review the behavior of software but are
 not primarly designed for software consumption.
 
-The strategy defined below is a more defined and controlled take on how logs
-can be used as a framework for monitoring, the intent is to solve the problem
-defined above but create a more strict definition of how logging is made.
+The strategy defined below is a take on how logs can be used as a framework for
+monitoring, the intent is to create a simple state machine that can be mastered
+and configured to alert users of malfunction.
+
+> Note that this enforce a very specific methodology around logging.
 
 ## State
 
@@ -44,11 +46,9 @@ Each blade start's by logging `Hello World`
     'blade_host_B': { 'msg': 'Hello World' } 
 }
 
-> note 'msg' is the default logging message, which is fine to keep
-
-With this we won't be able to effectively test in time if a blade has specified
-'hello world' in 'msg' because 'msg' is the default logging message which is
-overwritten on every log.
+> note 'msg' is the default logging message, with this we won't be able to 
+effectively test in time if a blade has specified 'hello world' in 'msg' 
+because 'msg' is the default logging message which is overwritten on every log.
 
 However we can test the presence of the nodes by inspecting the state's keys.
 
@@ -56,7 +56,7 @@ However we can test the presence of the nodes by inspecting the state's keys.
 
 Avoiding key-conflicts creates a method for manipulating the state based on
 instructions. Using a key-conflict allows us to manipulate existing values or
-erase them. 
+erase them.
 
 ## Testing goals
 
@@ -107,7 +107,7 @@ in the resolution. So,
         scraper started but no reveived data
 
     and 'spotter_host' in resolution.keys => 
-        scrapper and spotter and receiving
+        scrapper sends and spotter is receiving
 ```
 
 Also note that even tough scraper and spotter are receiving this might not mean
@@ -139,7 +139,8 @@ the following information.
                 'time_spent': '...'
                 'item_collected': '...',
                 'item_sent_tries': '...',
-                'item_sent': '...'
+                'item_sent': '...',
+                'errors': []
             }
         }
     }
@@ -163,3 +164,54 @@ the previous value and loose context.
 To implement a proper counter we need each count call to be preserved. This is
 done by using a separate key for each blade and managing this problem at the
 time of collapse. (todo, see counter CRDT)
+
+### Logging aggregation details
+
+Logging aggregation is provided both for docker and bare.
+
+#### Bare
+
+Bare logging aggregation is realised thanks to the /logs endpoint
+
+#### Docker
+
+Docker logging aggregation is realised using the docker api
+
+##### Docker Commands Summary
+
+###### Listen to Docker Events
+```bash
+curl --unix-socket /var/run/docker.sock http://localhost/events
+```
+
+###### Read Logs from a Specific Container
+Replace `[CONTAINER_ID]` with the container's ID.
+```bash
+curl --unix-socket /var/run/docker.sock "http://localhost/containers/[CONTAINER_ID]/logs?stdout=1&stderr=1&follow=1"
+```
+
+###### Retrieve containers ID's we should read logs from
+
+(List Containers Filtered Based on a Label)
+
+Labels are used to identify containers to collect logs from
+
+```bash
+curl --unix-socket /var/run/docker.sock "http://localhost/containers/json?filters=$(echo -n '{"label": ["mylabel=myvalue"]}' | jq -sRr @uri)"
+```
+
+###### Adding a Label in Docker Compose
+
+
+```yaml
+version: '3'
+services:
+  myservice:
+    image: myimage
+    labels:
+      mylabel: "myvalue"
+    # ... other service configuration ...
+```
+
+
+

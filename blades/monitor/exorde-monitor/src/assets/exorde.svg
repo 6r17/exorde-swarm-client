@@ -1,0 +1,24 @@
+<svg viewBox="2.5 3.91 89.06 122.62"  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" aria-hidden="true" role="img" >
+  <defs>
+    <style>
+        .cls-1, .cls-2{
+            fill:#eb712a;
+        }
+        .cls-2{
+            fill:#0e1121;
+        }
+        .cls-3{
+            fill:none;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .cls-2 {
+                fill: white;
+            }
+        }
+    </style>
+  </defs>
+  <polygon class="cls-1" points="32.69 126.53 2.5 126.53 2.5 3.91 32.69 3.91 32.69 65.22 32.69 126.53" transform="matrix(1, 0, 0, 1, 1.4210854715202004e-14, 1.4210854715202004e-14)"/>
+  <polygon class="cls-2" points="91.56 77.08 91.56 126.53 38.11 126.53 91.56 77.08" transform="matrix(1, 0, 0, 1, 1.4210854715202004e-14, 1.4210854715202004e-14)"/>
+  <polygon class="cls-2" points="91.56 53.36 91.56 3.91 38.11 3.91 91.56 53.36" transform="matrix(1, 0, 0, 1, 1.4210854715202004e-14, 1.4210854715202004e-14)"/>
+</svg>

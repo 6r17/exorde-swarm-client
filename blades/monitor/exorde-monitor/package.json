@@ -1,0 +1,21 @@
+{
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build",
+		"preview": "vite preview"
+	},
+	"dependencies": {
+		"lodash": "^4.17.21",
+		"preact": "^10.13.1",
+		"preact-iso": "^2.3.2",
+		"preact-render-to-string": "^6.3.1"
+	},
+	"devDependencies": {
+		"@preact/preset-vite": "^2.5.0",
+		"@types/lodash": "^4.14.201",
+		"typescript": "^5.2.2",
+		"vite": "^4.3.2"
+	}
+}

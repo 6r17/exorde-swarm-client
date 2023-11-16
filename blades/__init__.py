@@ -5,6 +5,7 @@ Blades are sub-classed with different endpoint and properties depending on the
 specific task.
 """
 
+import dataclasses
 import time
 import os
 import argparse
@@ -86,6 +87,12 @@ async def status(request):
     app_json = json.dumps(dict(request.app), default=app_serializer)
     return web.Response(text=app_json, content_type='application/json')
 
+def dataclass_to_dict(obj):
+    if dataclasses.is_dataclass(obj):
+        return dataclasses.asdict(obj)
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
 class JsonFormatter(logging.Formatter):
     """Format into OVH logging compatible format"""
     def __init__(self, *__args__, **kwargs):
@@ -107,16 +114,16 @@ class JsonFormatter(logging.Formatter):
         using env variables is prefered due to security concerns.
         """
         try:
-            logcheck = record.logcheck
+            logtest = record.logtest
         except:
-            logcheck = {}
+            logtest = {}
 
         base_log_record = {
             "host": self.host,
             "full_message": record.getMessage(),
             "timestamp": time.time(),
             "level": self.LEVEL_MAP.get(record.levelno, 1),
-            "_details": json.dumps(logcheck),
+            "_details": json.dumps(logtest, default=dataclass_to_dict), # custom keys are in _details, enforced by OVH
         }
         """
         If the key is not provided, the logger assumes that the user has NOT
@@ -132,6 +139,7 @@ class JsonFormatter(logging.Formatter):
             }
             base_log_record.update(ovh_extended_log_record)
         return json.dumps(base_log_record)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -161,7 +169,7 @@ if __name__ == '__main__':
         args.blade['host'], args.blade['port']
     )))
 
-    # Configure logger for 'blade' with no propagation
+    # Configure logger for 'blade'
     blade_logger = logging.getLogger('blade')
     # Stop this logger from propagating messages to the root logger
     blade_logger.propagate = False  

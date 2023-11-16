@@ -14,38 +14,38 @@ blades: # versions are handled dynamicly
       scrapers:
         - exorde-labs/rss007d0675444aa13fc
         - exorde-labs/exorde-scraping-module
-    host: 127.0.0.1
+    host: orchestrator
     port: 8000
     venv: "./venvs/orchestrator"
-
-  - name: monitor
-    blade: monitor
-    managed: true
-    static_cluster_parameters:
-      ntfy_at: 6r17
-    host: 127.0.0.1
-    port: 8004
-    venv: "./venvs/monitor"
 
   - name: spotting
     blade: spotting
     managed: true
     static_cluster_parameters:
       main_address: 0x0C3d8B32e22fe3714372608218b98D8b11Ae49dd 
-    host: 127.0.0.1
+    host: spotting
     port: 8001
     venv: "./venvs/spotting"
 
   - name: scraper_one
     blade: scraper
     managed: true
-    host: 127.0.0.1
+    host: scraper_one
     port: 8002
     venv: "./venvs/scraper_one"
 
   - name: scraper_two
     blade: scraper
     managed: true
-    host: 127.0.0.1
+    host: scraper_two
     port: 8003
     venv: "./venvs/scraper_two"
+
+  - name: monitor
+    blade: monitor
+    managed: true
+    static_cluster_parameters:
+      ntfy_at: 6r17
+    host: monitor
+    port: 8004
+    venv: "./venvs/monitor"

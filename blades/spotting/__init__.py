@@ -13,9 +13,7 @@ lock = asyncio.Lock()
 # Maximum size of the list before processing
 MAX_SIZE = 10
 
-# This could be any function that processes your data
 async def process_data(data):
-    # Replace with the actual processing you need to do
     print("Processing data:", data)
     await asyncio.sleep(1)  # Simulate some processing time
 

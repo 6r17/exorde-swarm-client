@@ -1,0 +1,48 @@
+version: '3'
+
+services:
+  orchestrator:
+    build: .
+    working_dir: /app/
+    command: python3.10 multi.py --as orchestrator --jlog -c topology/docker.yaml --novenv
+    volumes: 
+      - ./topology:/app/topology
+    labels:
+      exorde: monitor
+
+  spotting:
+    build: .
+    working_dir: /app/
+    command: python3.10 multi.py --as spotting --jlog -c topology/docker.yaml --novenv
+    volumes:
+      - ./topology:/app/topology
+    labels:
+      exorde: monitor
+
+  scraper_one:
+    build: .
+    working_dir: /app/
+    command: python3.10 multi.py --as scraper_one --jlog -c topology/docker.yaml --novenv
+    volumes:
+      - ./topology:/app/topology
+    labels:
+      exorde: monitor
+
+  scraper_two:
+    build: .
+    working_dir: /app/
+    command: python3.10 multi.py --as scraper_two --jlog -c topology/docker.yaml --novenv
+    volumes:
+      - ./topology:/app/topology
+    labels:
+      exorde: monitor
+
+  monitor:
+    build: .
+    working_dir: /app/
+    command: python3.10 multi.py --as monitor -c topology/docker.yaml --novenv
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./topology:/app/topology
+    ports:
+      - "8004:8004"
