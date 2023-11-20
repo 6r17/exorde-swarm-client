@@ -13,10 +13,20 @@ Orchestrate scraping wich is the result of
 
 """
 
+import time
+import logging
+from dataclasses import dataclass
 
 from .scraper_configuration import get_scrapers_configuration
 from .keywords import choose_keyword
+from .weighted_choice import weighted_choice
 
+from ...intent import Intent
+
+import random
+from typing import Union
+
+blade_logger = logging.getLogger('blade')
 
 """
 Choosing which domain is scrapped is done using a weighted_choice algorithm
@@ -56,19 +66,6 @@ async def choose_domain(weights: dict[str, float], *layers
     to provide incomplete weights and those are managed correctly
 
 """
-async def generate_quota_layer(
-    command_line_arguments: argparse.Namespace, counter: AsyncItemCounter
-) -> dict[str, float]:
-    """TODO: unmanaged atm"""
-    quotas = {k: v for d in command_line_arguments.quota for k, v in d.items()}
-    counts = {
-        k: await counter.count_occurrences(k) for k, __v__ in quotas.items()
-    }
-    layer = {
-        k: 1.0 if counts[k] < quotas[k] else 0.0 for k, __v__ in quotas.items()
-    }
-    return layer
-
 async def generate_focus_layer(blade, weights: dict[str, float]) -> dict[str, float]:
     """ returning an empty dict makes no change """
     onlies: list[str] = blade['static_cluster_parameters']['focus']
@@ -78,15 +75,46 @@ async def generate_focus_layer(blade, weights: dict[str, float]) -> dict[str, fl
 
 """
 
-def scraping_orchestration(
+
+def get_blades_location(topology, blade_type: str) -> list[str]:
+    """return a list hosts that match blade_type"""
+    result = []
+    for blade in topology['blades']:
+        if blade['blade'] == blade_type:
+            result.append('{}:{}'.format(blade['host'], blade['port']))
+    return result
+
+
+@dataclass
+class ScraperIntentParameters:
+    """
+    note that both scraping modules and blades are versioned and that is because
+    they are different entities. Scraping modules have their own version and
+    repositories.
+
+    Both are differenciated and handled in the orchestrator differently.
+
+    The scraper.py blade therfor contains two versioning systems :
+
+        - blade versioning (blade.py) which controls the blade's code
+        - scraping versioning (scraper.py) which controls the scraper's code
+    """
+    keyword: str # the keyword to scrap
+    parameters: dict # regular buisness related parameters
+    target: str # spotting host to send data to
+    module: str # the scraping module to use
+    version: str # the version of scraping module to use
+
+
+async def scraping_orchestration(
     blade, capabilities: dict[str, str], topology: dict
-) -> Intent:
+) -> Union[None, Intent]:
     try:
         scrapers_configuration = get_scrapers_configuration()
     except:
         blade_logger.exception("Error retriving scrapers configuration")
         return # having no scrapers_configuration available is a critical error
-               # to nothing for now but it does not resolve the situation
+               # do nothing for now but it does not resolve the situation
 
     # quota_layer: dict[str, float] = await generate_quota_layer(
     #     blade, counter
@@ -97,30 +125,36 @@ def scraping_orchestration(
     # focus_layer is configured by user and allows him to focus on spsc scrapers
     try:
         focus_layer: dict[str, float] = await generate_focus_layer(
-            blade, ponderation.weights,
+            blade, scrapers_configuration.weights,
         )
     except:
-        logging.exception(
+        blade_logger.exception(
             "Error while instanciating focus vector, ignoring feature"
         )
         focus_layer = {}
 
     try:
-        domain = await choose_domain(scrapers_configuration.weights, focus_layer)
+        domain = await choose_domain(
+            scrapers_configuration.weights, focus_layer
+        )
     except:
-        logging.exception(
-            "Error while choosing_domain, skipping intent")
+        blade_logger.exception(
+            "Error while choosing_domain, skipping intent"
         )
         return
 
-    # get the appropriate scraping module for `domain` 
-    scraper_module:str = ponderation.enabled_modules[domain][0]
+    # get the appropriate scraping module for `domain`, for now, the first [0] 
+    scraper_module:str = scrapers_configuration.enabled_modules[domain][0]
 
     # todo note : remove scrapers_configuration from choose_keyword
-    keyword = await choose_keyword(module.__name__. scrapers_configuration)
+    # it is currently used for keyword_alg which is mistakenly part of
+    # scrapers_conf
+    [keyword, __keyword_alg__] = await choose_keyword(
+        scraper_module.__name__, scrapers_configuration
+    )
 
     module = "exorde-labs/rss007d0675444aa13fc"
-    return Intent(
+    return Intent[ScraperIntentParameters](
         id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
         host='{}:{}'.format(blade['host'], blade['port']),
         blade='scraper',
@@ -131,7 +165,7 @@ def scraping_orchestration(
             target='http://{}/push'.format(
                 random.choice(get_blades_location(topology, 'spotting'))
             ),
-            keyword="BITCOIN",
+            keyword=keyword,
             parameters={
 
             }

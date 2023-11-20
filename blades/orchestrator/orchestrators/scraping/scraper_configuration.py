@@ -1,8 +1,16 @@
+from dataclasses import dataclass
+from typing import Dict, List, Union, Callable
+from datetime import datetime, timedelta
+import json
+import aiohttp
+import logging
+
 PONDERATION_URL: str = "https://raw.githubusercontent.com/exorde-labs/TestnetProtocol/main/targets/modules_configuration_v2.json"
 
 @dataclass
 class ScraperConfiguration:
     enabled_modules: Dict[str, List[str]]
+    module_list: list[str]
     generic_modules_parameters: Dict[str, Union[int, str, bool]]
     specific_modules_parameters: Dict[str, Dict[str, Union[int, str, bool]]]
     weights: Dict[str, float]
@@ -28,11 +36,11 @@ async def _get_scraper_configuration() -> ScraperConfiguration:
                 "specific_modules_parameters"
             ]
             weights = json_data["weights"]
-           
-           module_list: list[str] = [] # [owner/repo, ...]
+
+            module_list: list[str] = [] # [owner/repo, ...]
             def transform_module_urls(modules):
                 transformed_list = []
-                for key, urls in modules.items():
+                for __key__, urls in modules.items():
                     for url in urls:
                         parts = url.split('/')
                         # Usually the owner is at the 4th position and the repo at the 5th in the URL
@@ -40,6 +48,7 @@ async def _get_scraper_configuration() -> ScraperConfiguration:
                         transformed_list.append(owner_repo)
                 return transformed_list
             module_list = transform_module_urls(enabled_modules) 
+
             return ScraperConfiguration(
                 enabled_modules=enabled_modules,
                 module_list=module_list,
@@ -65,4 +74,4 @@ def scraper_configuration_geter() -> Callable:
     return get_scraper_configuration_wrapper
 
 
-get_scraper_configuration: Callable = scraper_configuration_geter()
+get_scrapers_configuration: Callable = scraper_configuration_geter()

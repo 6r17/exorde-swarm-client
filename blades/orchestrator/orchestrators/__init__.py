@@ -1,6 +1,6 @@
 from .scraping import scraping_orchestration
 from .spotting import spotting_orchestration
-from .orchestrator import orchestrator_orchestrator
+from .orchestrator import orchestrator_orchestration
 
 ORCHESTRATORS = {
     'scraper': scraping_orchestration,

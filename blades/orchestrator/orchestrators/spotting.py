@@ -1,4 +1,18 @@
-def spotting_orchestration(blade, capabilities: dict[str, str], topology: dict) -> Intent:
+from ..intent import Intent
+import time
+
+from dataclasses import dataclass
+
+@dataclass
+class SpottingIntentParameters:
+    """
+    For now there is no specific configuration around the Spotting module
+    because it's main_address is configured trough config which is sufficient 
+    for static topology.
+    """
+    pass
+
+def spotting_orchestration(blade, capabilities: dict[str, str], __topology__: dict) -> Intent:
     """The spotting orchestrator has no special implementation on static top"""
     return Intent(
         id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),

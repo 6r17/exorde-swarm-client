@@ -1,6 +1,6 @@
-import logging, os, json, aiohttp, time, re, random, asyncio, traceback
-from datetime import datetime
+import logging, os, json, aiohttp, time, re, random, asyncio
 
+from typing import Optional, Dict, Tuple
 from .scraper_configuration import ScraperConfiguration
 
 FALLBACK_DEFAULT_LIST = [
@@ -24,6 +24,7 @@ KEYWORDS_URL = "https://raw.githubusercontent.com/exorde-labs/TestnetProtocol/ma
 JSON_FILE_PATH = "keywords.json"
 KEYWORDS_UPDATE_INTERVAL = 5 * 60  # 5 minutes
 
+blade_logger = logging.getLogger('blade')
 
 ## READ KEYWORDS FROM SOURCE OF TRUTH
 async def fetch_keywords(keywords_raw_url) -> str:
@@ -36,7 +37,7 @@ async def fetch_keywords(keywords_raw_url) -> str:
                 ) as response:
                     return await response.text()
         except Exception as e:
-            logging.info(
+            blade_logger.info(
                 "[KEYWORDS] Failed to download keywords.txt from Github repo exorde-labs/TestnetProtocol: %s",
                 e,
             )
@@ -90,7 +91,7 @@ async def get_keywords():
                 if ts - last_update_ts < KEYWORDS_UPDATE_INTERVAL:
                     return data.get("keywords", [])
         except Exception as e:
-            logging.info(f"[KEYWORDS] Error during reading the JSON file: {e}")
+            blade_logger.info(f"[KEYWORDS] Error during reading the JSON file: {e}")
 
     # If execution reaches here, it means either JSON file does not exist
     # or the last update was more than 5 minutes ago. So, we attempt to fetch the keywords from the URL.
@@ -106,7 +107,7 @@ async def get_keywords():
         save_keywords_to_json(keywords)
         return keywords
     except Exception as e:
-        logging.info(
+        blade_logger.info(
             f"[KEYWORDS] Error during the processing of the keywords list: {e}"
         )
 
@@ -119,23 +120,31 @@ async def get_keywords():
                 data = json.load(json_file)
                 return data.get("keywords", [])
         except Exception as e:
-            logging.info(f"[KEYWORDS] Error during reading the JSON file: {e}")
+            blade_logger.info(f"[KEYWORDS] Error during reading the JSON file: {e}")
     # If execution reaches here, it means either JSON file does not exist
     # or there was an error during reading the JSON file.
     # Return the fallback default list.
-    logging.info(f"[KEYWORDS] Returning default fallback list")
+    blade_logger.info(f"[KEYWORDS] Returning default fallback list")
     return FALLBACK_DEFAULT_LIST
 
 
-from typing import Optional, Dict, Union, Callable
 
 
 def create_topic_lang_fetcher(refresh_frequency: int = 3600):
     url: str = "https://raw.githubusercontent.com/exorde-labs/TestnetProtocol/main/targets/topic_lang_keywords.json"
-    cached_data: Optional[Dict[str, list[str]]] = None
+    cached_data: Optional[Dict[str, dict[str, list[str]]]] = None
     last_fetch_time: float = 0
 
     async def fetch_data() -> dict[str, dict[str, list[str]]]:
+        """
+        {
+            <topic>: {
+                <lang-a>: ["Foo"],
+                <lang-b>: []
+            }
+        }
+        some langs can have empty lists
+        """
         nonlocal cached_data, last_fetch_time
         current_time: float = time.time()
 
@@ -151,14 +160,14 @@ def create_topic_lang_fetcher(refresh_frequency: int = 3600):
                         data = json.loads(await response.text())
                         cached_data = data
                         last_fetch_time = current_time
-                        logging.info(
+                        blade_logger.info(
                             "Data refreshed at: %s",
                             time.strftime(
                                 "%Y-%m-%d %H:%M:%S", time.localtime()
                             ),
                         )
             except Exception as e:
-                logging.error("Error fetching data: %s", str(e))
+                blade_logger.error("Error fetching data: %s", str(e))
         if not cached_data:
             raise Exception("Could not download topics")
         else:
@@ -169,42 +178,64 @@ def create_topic_lang_fetcher(refresh_frequency: int = 3600):
 
 topic_lang_fetcher = create_topic_lang_fetcher()
 
-import os
-import itertools
 
+async def choose_translated_keyword(
+    module_name: str, module_configuration: ScraperConfiguration
+):
+    """
+    New keyword_choose alg takes into account the module language and translated
+    keywords
 
-async def new_choose_keyword(module_name: str, module_configuration: ScraperConfiguration):
-    """New keyword_choose alg takes into account the module language"""
-    module_languages = module_configuration.lang_map[module_name]
+    translations are specified in topics and modules have different language
+    capabilities
+    """
 
-    topic_lang: dict[str, dict[str, list[str]]] = await topic_lang_fetcher()
-    topics: list[str] = list(topic_lang.keys())
-    choosed_topic = random.choice(topics)
+    """retrieve the topic lang data"""
     try:
-        choosed_language = random.choice(module_languages)
-
-        await websocket_send(
-            {
-                "intents": {
-                    intent_id: {
-                        "lang": choosed_language,
-                        "topic": choosed_topic,
-                    }
-                }
-            }
-        )
-
-        if choosed_language == "all":
-            topic_data: dict[str, list[str]] = topic_lang[choosed_topic]
-            all_keywords_lists = [
-                topic_data[language] for language in topic_data
-            ]
-            merged_keywords = list(itertools.chain(*all_keywords_lists))
-            return random.choice(merged_keywords)
-        else:
-            translated_keyword = choosed_topic[choosed_language]
-        return translated_keyword
+        topic_lang: dict[str, dict[str, list[str]]] = await topic_lang_fetcher()
+    
+        """Get a random topic"""
+        # create a list of topics
+        topics: list[str] = list(topic_lang.keys())
+        assert len(topics), "Retrieved topics are empty"
+        choosed_topic = random.choice(topics)
     except:
+        blade_logger.exception(
+            "while retrieving topic-lang in choose_translated_keyword, using fall-back"
+        )
+        return random.choice(FALLBACK_DEFAULT_LIST)
+    try:
+        # retrieve available languages for the specified topic
+        topic_languages = [
+            lang for lang in list(
+                topic_lang[choosed_topic].keys()
+            ) if len(topic_lang[choosed_topic][lang])
+        ] # filter out topics with empty translations
+        assert len(topic_languages), "Topic has no translation"
+
+        # retrieve available languages for the specified module_name
+        module_languages = module_configuration.lang_map[module_name]
+        assert len(module_languages), "Scraper module does not support topic-lang"
+
+        """
+        choose_language can be set to `all` in which case every language should
+        be considered
+        """
+        if module_languages == ["all"]:
+            module_languages = topic_languages
+
+        # determin languages that are scraper compatible and translated
+        intercompatible_languages = [
+            lang for lang in topic_languages if lang in module_languages
+        ]
+        # if there is no match we fall back using the topic
+        assert len(intercompatible_languages), "No language intercompatible"
+
+        # else we have a translated keyword by choosing an item in the list
+        return random.choice(intercompatible_languages)
+    except (KeyError, AssertionError):
+        blade_logger.exception("while using topic-lang algorithm, using fall-back")
+        # if there is no match we fall back using the topic
         return choosed_topic
 
 
@@ -223,18 +254,29 @@ Notes:
 async def choose_keyword(
     module_name: str,
     module_configuration: ScraperConfiguration,
-) -> str:
+) -> Tuple[str, str]:
+    """Feature-flipped with a threshold cursor"""
+    # cursor
     algorithm_choose_cursor = module_configuration.new_keyword_alg
+    # number generation
     random_number = random.randint(0, 99)
     alg = None
     result = None
+    """
+    a cursor at 80 would give it 80% chance of beeing choosen
+    
+    new algorithm is choosen if the random number is bellow the cursor
+
+    | . . . . c . . |
+
+    """
     if random_number <= algorithm_choose_cursor:
         try:
-            result = await new_choose_keyword(
-                module_name, module_configuration, websocket_send, intent_id
+            result = await choose_translated_keyword(
+                module_name, module_configuration
             )
             alg = 'new'
-        except Exception as e:
+        except Exception:
             result = await default_choose_keyword()
             alg = 'old'
     result = await default_choose_keyword()

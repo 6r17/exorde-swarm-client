@@ -1,9 +1,7 @@
 # scraper.py
-import argparse
 import asyncio
 from aiohttp import web, ClientSession
 import subprocess
-import pkg_resources
 import sys
 import os
 import logging
@@ -47,7 +45,7 @@ class Scraper:
                     f"git+https://github.com/{repository_path}.git@{intent['params']['version']}#egg={module_name}"
                 ]
             )
-        except (subprocess.CalledProcessError) as e:
+        except (subprocess.CalledProcessError):
             """
             The install process is locked
                 - the blade cannot install new modules
@@ -55,7 +53,7 @@ class Scraper:
                 - the blade might be inoperant
                 - can we only restart ? -> this did not solve the problem
             """
-        except PackageNotFoundError as e:
+        except PackageNotFoundError:
             # the package tag should be marked as faulty
             """
             2 strategies:

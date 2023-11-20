@@ -72,7 +72,6 @@ async def load_intent(request):
     This wrapper is responsible for managing the internal's blade version and
     propagates the call to the blade's internal `load_intent` function.
     """
-    intent = await request.json()
     if request.app.get('load_intent', None):
         try:
             # we define the interface using request.app internal dict 

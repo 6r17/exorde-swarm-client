@@ -1,4 +1,15 @@
-def orchestrator_orchestration(blade, capabilities: dict[str, str], topology: dict) -> Intent:
+
+import time
+
+from ..intent import Intent
+from dataclasses import dataclass
+
+@dataclass
+class OrchestratorIntentParameters:
+    """Does-Nothing"""
+    pass
+
+def orchestrator_orchestration(blade, capabilities: dict[str, str], __topology__: dict) -> Intent:
     """The orchestrator orchestrator has no special implementation on static top"""
     return Intent(
         id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),

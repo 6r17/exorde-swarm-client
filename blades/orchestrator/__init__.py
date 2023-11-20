@@ -22,76 +22,17 @@ parameters.
     modules and provide a report on it. (not for this PR)
 
 """
-import time
 import asyncio
 from aiohttp import web, ClientSession, ClientTimeout
-from dataclasses import dataclass, asdict
+from dataclasses import asdict
 from typing import Union
-import json
-import random
 import logging
 
 from .versioning import versioning_on_init, RepositoryVersion
 from .orchestrators import ORCHESTRATORS
+from .intent import Intent
 
-"""
-# Intents.
-
-Intents are designed as a configuration rather than instructions. The goal is
-therefor to start, stop, re-configure different modules rather than specificly
-follow each instruction and centralize them.
-
-For example for scrapping the interface design is the following :
-"""
-@dataclass
-class ScraperIntentParameters:
-    """
-    note that both scraping modules and blades are versioned and that is because
-    they are different entities. Scraping modules have their own version and
-    repositories.
-
-    Both are differenciated and handled in the orchestrator differently.
-
-    The scraper.py blade therfor contains two versioning systems :
-
-        - blade versioning (blade.py) which controls the blade's code
-        - scraping versioning (scraper.py) which controls the scraper's code
-    """
-    keyword: str # the keyword to scrap
-    parameters: dict # regular buisness related parameters
-    target: str # spotting host to send data to
-    module: str # the scraping module to use
-    version: str # the version of scraping module to use
-
-@dataclass
-class SpottingIntentParameters:
-    """
-    For now there is no specific configuration around the Spotting module
-    because it's main_address is configured trough config which is sufficient 
-    for static topology.
-    """
-    pass
-
-@dataclass
-class OrchestratorIntentParameters:
-    """Does-Nothing"""
-    pass
-
-
-@dataclass
-class Intent:
-    """
-    Intents are wrapped to contain a host (they always are meant to an entity)
-    """
-    id: str # time:host
-    host: str # including port
-    blade: str # blade to use
-    version: str # blade's version
-    params: Union[
-        SpottingIntentParameters, 
-        ScraperIntentParameters,
-        OrchestratorIntentParameters,
-    ]
+blade_logger = logging.getLogger('blade')
 
 """
 Resolvers are the interface trough which we can express scrappers behavior
@@ -101,15 +42,6 @@ They are tailored for different types of nodes (scraper, spotting, quality)
 and allow us to re-configure the node at runtime.
 
 """
-
-def get_blades_location(topology, blade_type: str) -> list[str]:
-    """return a list hosts that match blade_type"""
-    result = []
-    for blade in topology['blades']:
-        if blade['blade'] == blade_type:
-            result.append('{}:{}'.format(blade['host'], blade['port']))
-    return result
-
 async def think(app) -> dict[str, Intent]: # itent.id : intent
     """
     Low Level `Brain`:
@@ -118,13 +50,13 @@ async def think(app) -> dict[str, Intent]: # itent.id : intent
 
     """
     # get the version map (versioning.py)
-    capabilities: list[RepositoryVersiong] = await app['version_manager'].get_latest_valid_tags_for_all_repos()
+    capabilities_list: list[RepositoryVersion] = await app['version_manager'].get_latest_valid_tags_for_all_repos()
     capabilities: dict[str, str] = { # path : tag_name
         repository_versioning.repository_path: repository_versioning.tag_name
-        for repository_versioning in capabilities
+        for repository_versioning in capabilities_list
     }
 
-    def resolve(node: dict) -> Intent:
+    def resolve(node: dict) -> Union[Intent, None]:
         """
         intents are results of orchestration rules that we define for each node.
         """
@@ -135,6 +67,7 @@ async def think(app) -> dict[str, Intent]: # itent.id : intent
     # generate intent list
     result: dict[str, Intent] = {} # id : intent(id,...)
     for node in app['topology']['blades']:
+        new_intent: Union[Intent, None] = None
         try:
             new_intent = resolve(node)
         except:
@@ -173,7 +106,6 @@ note :
 """
 
 
-blade_logger = logging.getLogger('blade')
 
 async def commit_intent(intent: Intent):
     async with ClientSession(timeout=ClientTimeout(1)) as session:
@@ -199,7 +131,7 @@ async def orchestrate(app):
             blade_logger.info('intent vector initialized', extra={
                 'logtest': { 'intents': indexed_intents }
             })
-            feedback_vector = await asyncio.gather(
+            __feedback_vector__ = await asyncio.gather(
                 *[commit_intent(
                     indexed_intents[intent_id]
                 ) for intent_id in indexed_intents]
