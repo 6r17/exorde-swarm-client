@@ -6,6 +6,8 @@ on it
 from aiohttp import web
 import asyncio
 
+blade_logger = logging.getLogger('blade')
+
 # Shared state and lock
 shared_data = {'items': []}
 lock = asyncio.Lock()
@@ -14,13 +16,12 @@ lock = asyncio.Lock()
 MAX_SIZE = 10
 
 async def process_data(data):
-    print("Processing data:", data)
+    blade_logger.info("Processing data:", data)
     await asyncio.sleep(1)  # Simulate some processing time
+    blade_logger.info('Done processing data')
 
 async def add_data(request):
-    """
-    Scrapers push items trough this endpoint
-    """
+    """Scrapers push items trough this endpoint"""
     data = await request.text()
     
     async with lock:
@@ -41,4 +42,4 @@ async def add_data(request):
     return web.Response(text="Data added.")
 
 app = web.Application()
-app.router.add_post('/add', add_data)
+app.router.add_post('/push', add_data)

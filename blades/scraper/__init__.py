@@ -8,7 +8,7 @@ import sys
 import os
 import logging
 from importlib import import_module, metadata
-
+import time
 
 blade_logger = logging.getLogger('blade')
 
@@ -24,7 +24,7 @@ class Scraper:
         as such they should have their own error management.
     """
     def __init__(self):
-        self.is_active = False  # Controls whether the scraper is active or not
+        self.task = None
   
     def install_module(self, intent): # cannot fail
         """
@@ -37,12 +37,14 @@ class Scraper:
         try:
             # repository_path = "owner/path"
             repository_path = intent['params']['module']
-            # this hard-locks us to github
+            # becomes /path
+            module_name = os.path.basename(intent['params']['module'].rstrip("/"))
+            # hard-locks us to github
             subprocess.check_call(
                 [
                     "pip", 
                     "install", 
-                    f"git+https://github.com/{repository_path}.git"
+                    f"git+https://github.com/{repository_path}.git@{intent['params']['version']}#egg={module_name}"
                 ]
             )
         except (subprocess.CalledProcessError) as e:
@@ -53,7 +55,6 @@ class Scraper:
                 - the blade might be inoperant
                 - can we only restart ? -> this did not solve the problem
             """
-            os._exit(1)
         except PackageNotFoundError as e:
             # the package tag should be marked as faulty
             """
@@ -67,7 +68,8 @@ class Scraper:
                                 -> alert
                                 -> fallback
             """
-        os._exit(0) 
+        # in every case we restart the process with the same arguments
+        os.execl(sys.executable, sys.executable, *sys.argv)
 
     def load_intent(self, intent): # cannot fail
         """
@@ -76,43 +78,88 @@ class Scraper:
                 - install the module if not
             - loads the module
         """
-        # {owner}/{path} becomes {path} 
-        module = os.path.basename(intent['params']['module'].rstrip("/"))
+        """Prepare the intent digestion"""
         blade_logger.info('loading intent')
         try:
-            local_version = metadata.version(module_name)
-        except metadata.PackageNotFoundError:
-            self.install_module(intent)
-        except Exception as e:
-            # unhandled error should:
-                # (IF they are not metadata's fault)
-                #   mark package's version as faulty
-                # (IF they are metadata's fault)
-                #   mark the client's version as faulty
-            pass
-        finally:
-            if local_version != intent['params']['version']:
-                self.install_module(intent)
+            # {owner}/{path} becomes {path} 
+            module_name = os.path.basename(intent['params']['module'].rstrip("/"))
+            install_required:bool = False
+            local_version: Union[None, str] = None
+            try:
+                local_version = metadata.version(module_name)
+                """install if the package is absent"""
+            except metadata.PackageNotFoundError:
+                install_required = True
+            finally:
+                """install if the package version differs"""
+                if local_version != intent['params']['version']:
+                    install_required = True
+
+            """
+            Logs the intent digestion
+            """
+            intent_resolution = {
+                'local_version': local_version,
+                'intent_version': intent['params']['version'],
+                'install_required': install_required,
+            }
+            if install_required:
+                install_id = '{}:{}'.format(time.time(), intent['host']) 
+                intent_resolution['install'] = install_id
+
+            blade_logger.info('load_intent', extra={
+                'logtest': {
+                    'intents': {
+                        intent['id']: {
+                            'resolution': {
+                                intent['host']: intent_resolution
+                            }
+                        }
+                    }
+                }
+            })
+
+            """
+            Depending if the install is required the intent should either
+                - install the package
+                or
+                - load the package
+            """
+
+            if install_required:
+                self.install_module(intent) # will exit the process
             else:
-                self.module = import_module(module_name)
+                if self.task == None:
+                    blade_logger.info('Creating scraping task')
+                    self.task = asyncio.create_task(self.start_scraping(intent))
+                else:
+                    pass
+                    # stop task & reload
+        except Exception as err:
+            blade_logger.exception('error in load_intent : {}'.format(err))
 
-    async def start_scraping(self): # cannot fail
-        bade_logger.info('Start scraping')
-        self.is_active = True
-        async for data in self.data_generator():
-            if not self.is_active: 
-                break
-            await self.push_data(data)
-    
-    def stop_scraping(self):
-        self.is_active = False
-
-    async def data_generator(self):
-        while self.is_active:
-            data = "some scraped data"
-            yield data
-            await asyncio.sleep(1)
-    
+    async def start_scraping(self, intent:dict): # cannot fail
+        # assume the passed module always contains the github prefix
+        scraping_module_name:str = module_name = os.path.basename(intent['params']['module'].rstrip("/"))
+        blade_logger.info('start_scraping : {}'.format(scraping_module_name))
+        parameters = {}
+        try:
+            scraper_module = import_module(scraping_module_name)
+            scraper_generator = scraper_module.query(intent['params']['parameters'])
+        except:
+            blade_logger.exception('An error occured while loading {}'.format(scraping_module_name))
+        finally:
+            async for item in scraper_instance:
+                blade_logger.info('found new data', extra={
+                    'printonly': {
+                        'item': item
+                    }
+                })
+                try:
+                    await self.push_data(item)
+                except:
+                    logging.exception('An error occured pushing data')
+   
     async def push_data(self, data): # CANNOT FAIL
         """
         Pushing data should never be blocking
@@ -123,33 +170,17 @@ class Scraper:
                 - [COMPLEX] hold the data until capability 
         """
         blade_logger.info('pushing data')
-        async with ClientSession() as session:
-            # Assuming that 'data' is a dictionary that can be turned into JSON
-            try:
-                async with session.post(
-                    'http://127.0.0.1:8081/add', json=data
-                ) as response:
+        target = self.intent['params']['target']
+        # Assuming that 'data' is a dictionary that can be turned into JSON
+        try:
+            async with ClientSession() as session:
+                async with session.post(target, json=data) as response:
                     response_data = await response.text() 
                     blade_logger.info(f"Status: {response.status}")
                     blade_logger.info(f"Response: {response_data}")
-            except:
-                blade_logger.error('Could not push data')
+        except:
+            blade_logger.exception('Could not push data')
 
-
-def stop_scraping(request):
-    """Cancel the scraper task"""
-    blader_logger.info('stop scraping')
-    scraper_task = request.app.get('scraper_task')
-    if scraper_task:
-        scraper_task.cancel()
-        request.app['scraper'].stop_scraping()
-
-
-async def start_scraping(request):
-    """Create a task for the scraper to run in the background"""
-    request.app['scraper_task'] = asyncio.create_task(
-        request.app['scraper'].start_scraping()
-    )
 
 async def load_intent(request):
     """
@@ -158,7 +189,6 @@ async def load_intent(request):
     this is used to manage the versioning of scraping modules
     """
     intent = await request.json()
-    blade_logger.info('scraper load_intent : {}, {}'.format(intent, request.app['scraper']))
     request.app['scraper'].load_intent(intent)
     return web.json_response(request.app['node'])
 

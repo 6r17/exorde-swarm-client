@@ -52,6 +52,7 @@ from enum import Enum
 from asyncdb import AsyncDB, AsyncPool
 from typing import Optional
 
+from scraper_configuration import get_scraper_configuration, ScraperConfiguration
 
 logger = logging.getLogger('blade')
 
@@ -81,7 +82,7 @@ class Repository:
     tags: list[Tag]
 
 
-async def get_repository_versioning(repo: str) -> Repository:
+async def get_repository_versioning(repo: str, semaphore) -> Repository:
     """Retrieves a repository available tags ; repo is owner/path"""
     async def fetch_json(url: str):
         async with aiohttp.ClientSession() as session:
@@ -90,7 +91,8 @@ async def get_repository_versioning(repo: str) -> Repository:
                 return await response.json()
 
     tags_url = f"https://api.github.com/repos/{repo}/tags"
-    tags = await fetch_json(tags_url)
+    async with semaphore:
+        tags = await fetch_json(tags_url)
 
     # Filter out pre-releases
     valid_tags = [
@@ -140,12 +142,6 @@ class VersionManager:
         self.github_cache_threshold_minutes = blade['static_cluster_parameters'].get(
             'github_cache_threshold_minutes', 10
         )
-        repositories: list[str] = [
-            "exorde-labs/exorde-swarm-client",
-        ] # includes every blade
-        # and add every repository listed by the user's configuration
-        repositories.extend(blade['static_cluster_parameters']['scrapers'])
-        self.repositories = repositories
 
     async def set_up(self):
         async with await self.db.connection() as conn:
@@ -189,13 +185,48 @@ class VersionManager:
 
     async def sync(self, cache=True):
         """Synchronize repository tags with online version."""
-        threshold_time = datetime.utcnow() - timedelta(minutes=self.github_cache_threshold_minutes)
-        # Convert threshold_time to a format suitable for SQLite comparison
-        formatted_threshold_time = threshold_time.strftime('%Y-%m-%d %H:%M:%S')
+        synchronize_id = time.time() # sync is not a parallel event
+        def synclogtest(logtest):
+            nonlocal synchronize_id
+            return {
+                'logtest': { # key for logtest
+                    'version_syncronization': { # identify this feature
+                        synchronize_id: logtest 
+                    }
+                }
+            }
+        logger.info('synchronizing repositories', extra=synclogtest({}))
 
+        #repositories defined in the sync method permit them to be synced
+        repositories: list[str] = [
+            "exorde-labs/exorde-swarm-client",
+        ] # includes blade base
+        # and add every repository listed by the scraper_configuration 
+        try:
+            scraping_configuration: ScraperConfiguration = get_scraper_configuration()
+        except:
+            blade_logger.exception(
+                "Error retrieving scraping configuration", extra=synclogtest({
 
+                })
+            )
+        repositories.extend(scraping_configuration.module_list)
+        # todo add scrapers listed by the user (morph scrapers into a dict)
+        # repositories.extend(blade['static_cluster_parameters']['scrapers'])
+        self.repositories = repositories
+
+        # To run multiple tasks using asyncio.gather but in a way that 
+        # doesn't bombard an endpoint too harshly,
+        semaphore = asyncio.Semaphore(2)  # Allow 2 concurrent tasks
+
+        # Retrieve tags from repositories that needs an update
         async with await self.db.connection() as conn:
             if cache:
+                # Determin peremption time
+                threshold_time = datetime.utcnow() - timedelta(minutes=self.github_cache_threshold_minutes)
+                # Convert threshold_time to a format suitable for SQLite comparison
+                formatted_threshold_time = threshold_time.strftime('%Y-%m-%d %H:%M:%S')
+
                 # Get repositories that need updating based on the threshold
                 (repos_to_update, error) = await conn.query(
                     'SELECT path FROM repositories WHERE last_online_retrieval < :formated_threshold_time',
@@ -210,13 +241,12 @@ class VersionManager:
 
                 # Gather repository data asynchronously for repositories that need updating
                 repositories = await asyncio.gather(
-                    *[get_repository_versioning(repo) for repo in repositories_to_sync]
+                    *[get_repository_versioning(repo, semaphore) for repo in repositories_to_sync]
                 )
             else:
                 repositories = await asyncio.gather(
-                    *[get_repository_versioning(repo) for repo in self.repositories]
+                    *[get_repository_versioning(repo, semaphore) for repo in self.repositories]
                 )
-
 
             inserted_repositories = [
                 (repository.path,) for repository in repositories
@@ -233,7 +263,6 @@ class VersionManager:
             (identified_repositories, error) = await conn.query(
                 'SELECT * FROM repositories'
             )
-
 
             def identify(repository: str, identified_repositories) -> int:
                 for identified_repository in identified_repositories:
@@ -405,4 +434,4 @@ async def versioning_on_init(app):
     try:
         await app['version_manager'].sync(cache=False)
     except:
-        pass
+        logger.exception('an error occured while synchronizing repositories')

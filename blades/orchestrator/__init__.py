@@ -24,7 +24,7 @@ parameters.
 """
 import time
 import asyncio
-from aiohttp import web, ClientSession
+from aiohttp import web, ClientSession, ClientTimeout
 from dataclasses import dataclass, asdict
 from typing import Union
 import json
@@ -32,6 +32,7 @@ import random
 import logging
 
 from .versioning import versioning_on_init, RepositoryVersion
+from .orchestrators import ORCHESTRATORS
 
 """
 # Intents.
@@ -57,7 +58,7 @@ class ScraperIntentParameters:
         - scraping versioning (scraper.py) which controls the scraper's code
     """
     keyword: str # the keyword to scrap
-    extra_parameters: dict # regular buisness related parameters
+    parameters: dict # regular buisness related parameters
     target: str # spotting host to send data to
     module: str # the scraping module to use
     version: str # the version of scraping module to use
@@ -109,96 +110,11 @@ def get_blades_location(topology, blade_type: str) -> list[str]:
             result.append('{}:{}'.format(blade['host'], blade['port']))
     return result
 
-def scraping_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
-    """
-    Using resolvers we can configure blades parameters such as keywords, timeout
-    etc... but most importantly the version of modules. The blade will be able
-    to re-install a new version in it's venv and restart*.
-
-    *not a container-stop but a process-stop 
-    """
-    module = "exorde-labs/rss007d0675444aa13fc"
-    return Intent(
-        id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
-        host='{}:{}'.format(blade['host'], blade['port']),
-        blade='scraper',
-        version=capabilities['exorde-labs/exorde-swarm-client'],
-        params=ScraperIntentParameters(
-            module=module,
-            version=capabilities[module],
-            target=random.choice(get_blades_location(topology, 'spotting')),
-            keyword="BITCOIN",
-            extra_parameters={
-
-            }
-        )
-    )
-
-def spotting_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
-    """The spotting resolver has no special implementation on static top"""
-    return Intent(
-        id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
-        blade='spotting', # we never change a blade's behavior in static top
-        version=capabilities['exorde-labs/exorde-swarm-client'],
-        host='{}:{}'.format(blade['host'], blade['port']),
-        params=SpottingIntentParameters() # does nothing for spotting, maybe pass worker addr
-    )
-
-def orchestrator_resolver(blade, capabilities: dict[str, str], topology: dict) -> Intent:
-    """The orchestrator resolver has no special implementation on static top"""
-    return Intent(
-        id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
-        blade='orchestrator',
-        version=capabilities['exorde-labs/exorde-swarm-client'],
-        host='{}:{}'.format(blade['host'], blade['port']),
-        params=OrchestratorIntentParameters() # does nothing for orch,  NOTE : both need to control
-                                                                              # version
-    )
-
-RESOLVERS = {
-    'scraper': scraping_resolver,
-    'spotting': spotting_resolver,
-    'orchestrator': orchestrator_resolver
-}
-
 async def think(app) -> dict[str, Intent]: # itent.id : intent
     """
-    Low Level Note:
+    Low Level `Brain`:
 
-    Analog to the brain but instead of generating keywords in generate a list
-    of nodes that should be at a specific state, difference here is that:
-
-        - The result now includes the spotting module as the orchestrator should
-        theoreticly specify the behavior of every node
-        (this would allow us to change the behavior of a node if we are balancing)
-    
-        - The keyword configuration now also includes the version of the scraping
-        module to use.
-
-    note: 
-
-        - The overall idea behind this architecture is to assume an instable
-        software which may interup at anytime (due to pip installs & exit) ; 
-
-        - it also provides us a way to assume the status of the system and have
-        enough data available in order to change the behavior or even topology
-        of the system.
-
-        (eg data / failure rate of module/version for behavior)
-        (   and capacity evaluation based on spotting threshold )
-        (   so for this we would need a way to evaluate nodes capacity )
-
-    For example we will be able in the future to switch from a 4-scrappers 1 
-    spotter to 3 scrapper 2 spotters if the spotter is getting overwhelmed.
-
-    ===========================================================================
-
-
-    Buisness Related Goals:
-        - each module should know:
-            - what module with which version it sould use
-            - what keyword it should scrap with
-            - and have it's specific parameters
+        Generate an index of intents for every node
 
     """
     # get the version map (versioning.py)
@@ -208,17 +124,30 @@ async def think(app) -> dict[str, Intent]: # itent.id : intent
         for repository_versioning in capabilities
     }
 
-    # generate intent list
-    result: dict[str, Intent] = {} # id : intent
     def resolve(node: dict) -> Intent:
-        resolver = RESOLVERS.get(node['blade'], None)
-        if resolver:
-            return resolver(node, capabilities, app['topology'])
+        """
+        intents are results of orchestration rules that we define for each node.
+        """
+        orchestrator = ORCHESTRATORS.get(node['blade'], None)
+        if orchestrator: # skip for undefined orchestration
+            return orchestrator(node, capabilities, app['topology'])
 
+    # generate intent list
+    result: dict[str, Intent] = {} # id : intent(id,...)
     for node in app['topology']['blades']:
-        new_intent = resolve(node)
-        if new_intent:
-            result[new_intent.id] = new_intent
+        try:
+            new_intent = resolve(node)
+        except:
+            blade_logger.exception(
+                "An error occured creating an intent for {}".format(node)
+            )
+        finally:
+            if new_intent: # intents can return None to skip silently (bad)
+                result[new_intent.id] = new_intent
+            else:
+                blade_logger.warning(
+                    "Orchestration result was empty for {}".format(node)
+                )
     return result
 
 """
@@ -247,13 +176,13 @@ note :
 blade_logger = logging.getLogger('blade')
 
 async def commit_intent(intent: Intent):
-    async with ClientSession() as session:
+    async with ClientSession(timeout=ClientTimeout(1)) as session:
         host = 'http://' + intent.host
         try:
             async with session.post(host, json=asdict(intent)) as response:
                 return response
         except:
-            # the blade is non responsive
+            # the blade is non responsive which can happen atm when the module pip installs
             blade_logger.warning('Could not reach {}'.format(host))
 
 async def orchestrate(app):
@@ -271,13 +200,16 @@ async def orchestrate(app):
                 'logtest': { 'intents': indexed_intents }
             })
             feedback_vector = await asyncio.gather(
-                *[commit_intent(intent) for intent in indexed_intents]
+                *[commit_intent(
+                    indexed_intents[intent_id]
+                ) for intent_id in indexed_intents]
             )
             await asyncio.sleep(
-                app['blade']['static_cluster_parameters']['monitor_interval_in_seconds'] - 1
+                app['blade']['static_cluster_parameters']['orchestrator_interval_in_seconds'] - 1
             )
-        except Exception as err:
-            blade_logger.exception('An error occured in the orchestrator : {}'.format(err))
+        except:
+            blade_logger.exception('An error occured in the orchestrator')
+            blade_logger.info(app['blade']['static_cluster_parameters'])
 
 
 async def orchestrator_on_init(app):
@@ -292,4 +224,3 @@ app = web.Application()
 app.on_startup.append(orchestrator_on_init)
 app.on_startup.append(versioning_on_init)
 app.on_cleanup.append(orchestrator_on_cleanup)
-

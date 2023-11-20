@@ -94,7 +94,6 @@ def dataclass_to_dict(obj):
 
 
 class JsonFormatter(logging.Formatter):
-    """Format into OVH logging compatible format"""
     def __init__(self, *__args__, **kwargs):
         self.host = kwargs["host"]
 
@@ -107,24 +106,49 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record):
         """
-        OVH logging requires multiple mandatory fields to be present on each
-        items. It WILL silently ignore any non-formated log.
+        Complex & tries to do multiple things at the same time.
+        Goal is to be able to log what we want where we want.
 
-        The OVH API key should NOT be provided in the top.yaml ; 
-        using env variables is prefered due to security concerns.
+        So this is a logging router
+
+        - LogTest compatible (custom logging state) (logtest field, should not be sent to OVH)
+        - should be OVH format compatible (base_log_record + _details) (not implemented atm)
+        - with a PrintOnly field (print only in the logs)
+
+        This does not handle splitting out the logs appropriately ATM and would
+        require further tinkering to send data to OVH.
+            - create multiple log stream
+                -- OVH (with _details and no logtest and printonly)
+                -- logtest (logtest and printonly)
+
+        so OVH is ignored atm in favor of Grafana & Prom that do not rely on 
+        logs, so no additional logstream is required.
+        """
+        """
+        Logtests are 
         """
         try:
             logtest = record.logtest
         except:
             logtest = {}
+        if record.exc_info:
+            # does not save the error
+            logtest['exception'] = self.formatException(record.exc_info)
 
         base_log_record = {
             "host": self.host,
             "full_message": record.getMessage(),
             "timestamp": time.time(),
             "level": self.LEVEL_MAP.get(record.levelno, 1),
-            "_details": json.dumps(logtest, default=dataclass_to_dict), # custom keys are in _details, enforced by OVH
+            "_details": {}, # reserved for OVH
         }
+
+
+        printonly = getattr(record, 'printonly', None)
+        if printonly:
+            base_log_record['printonly'] = printonly
+
+
         """
         If the key is not provided, the logger assumes that the user has NOT
         expressed OVH formating but only JLOG.
@@ -171,8 +195,6 @@ if __name__ == '__main__':
 
     # Configure logger for 'blade'
     blade_logger = logging.getLogger('blade')
-    # Stop this logger from propagating messages to the root logger
-    blade_logger.propagate = False  
     # Set the minimum log level
     blade_logger.setLevel(logging.DEBUG)  
 

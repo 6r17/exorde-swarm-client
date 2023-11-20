@@ -3,7 +3,11 @@ blades: # versions are handled dynamicly
     blade: orchestrator
     managed: true
     static_cluster_parameters:
-      monitor_interval_in_seconds: 1
+      quota: # per 24 hours
+        exorde-labs/rss007d0675444aa13fc: 10000
+      focus: # orchestrator will only scrap using those modules
+        - exorde-labs/rss007d0675444aa13fc
+      orchestrator_interval_in_seconds: 10
       github_cache_threshold_minutes: 10
       github_app_id: 423653
       github_private_key: github.pem
@@ -11,9 +15,6 @@ blades: # versions are handled dynamicly
       db:
         driver: sqlite
         database: orchestrator.sqlite
-      scrapers:
-        - exorde-labs/rss007d0675444aa13fc
-        - exorde-labs/exorde-scraping-module
     host: orchestrator
     port: 8000
     venv: "./venvs/orchestrator"
