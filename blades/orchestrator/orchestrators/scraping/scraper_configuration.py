@@ -15,7 +15,7 @@ class ScraperConfiguration:
     specific_modules_parameters: Dict[str, Dict[str, Union[int, str, bool]]]
     weights: Dict[str, float]
     lang_map: Dict[str, list]  # module_name as key
-    new_keyword_alg: int  # weight for #986
+    new_keyword_alg: int # weight for #986
 
 
 async def _get_scraper_configuration() -> ScraperConfiguration:
@@ -43,7 +43,8 @@ async def _get_scraper_configuration() -> ScraperConfiguration:
                 for __key__, urls in modules.items():
                     for url in urls:
                         parts = url.split('/')
-                        # Usually the owner is at the 4th position and the repo at the 5th in the URL
+                        # Usually the owner is at the 4th position and the repo 
+                        # at the 5th in the URL
                         owner_repo = parts[3] + '/' + parts[4]
                         transformed_list.append(owner_repo)
                 return transformed_list

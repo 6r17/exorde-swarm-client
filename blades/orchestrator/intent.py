@@ -17,8 +17,8 @@ class Intent(Generic[T]):
     """
     Intents are wrapped to contain a host (they always are meant to an entity)
     """
-    id: str      # time:host
-    host: str    # including port
-    blade: str   # blade to use
-    version: str # blade's version
-    params: T  # defined by each orchestrations
+    id: str                     # time:host
+    host: str                   # including port
+    blade: str                  # blade to use
+    version: str                # blade's version
+    params: T                   # defined by each orchestrations

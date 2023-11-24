@@ -12,7 +12,7 @@ class SpottingIntentParameters:
     """
     pass
 
-def spotting_orchestration(blade, capabilities: dict[str, str], __topology__: dict) -> Intent:
+async def spotting_orchestration(blade, capabilities: dict[str, str], __topology__: dict, __selfblade__) -> Intent:
     """The spotting orchestrator has no special implementation on static top"""
     return Intent(
         id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),

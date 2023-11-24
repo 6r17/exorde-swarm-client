@@ -3,3 +3,5 @@ venvs
 *.pem
 *.sqlite
 multi.log
+grafana
+exorde_data

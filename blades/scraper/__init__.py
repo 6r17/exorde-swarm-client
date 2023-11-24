@@ -6,6 +6,8 @@ import sys
 import os
 import logging
 from importlib import import_module, metadata
+from importlib.metadata import PackageNotFoundError
+from typing import Union
 import time
 
 blade_logger = logging.getLogger('blade')
@@ -131,6 +133,7 @@ class Scraper:
                     blade_logger.info('Creating scraping task')
                     self.task = asyncio.create_task(self.start_scraping(intent))
                 else:
+                    # does not change the task for now
                     pass
                     # stop task & reload
         except Exception as err:
@@ -138,37 +141,47 @@ class Scraper:
 
     async def start_scraping(self, intent:dict): # cannot fail
         # assume the passed module always contains the github prefix
-        scraping_module_name:str = module_name = os.path.basename(intent['params']['module'].rstrip("/"))
+        scraping_module_name:str = os.path.basename(
+            intent['params']['module'].rstrip("/")
+        )
         blade_logger.info('start_scraping : {}'.format(scraping_module_name))
-        parameters = {}
         try:
             scraper_module = import_module(scraping_module_name)
-            scraper_generator = scraper_module.query(intent['params']['parameters'])
+            scraper_generator = scraper_module.query(
+                intent['params']['parameters']
+            )
+            try:
+                async for item in scraper_generator:
+                    blade_logger.info('found new data', extra={
+                        'printonly': {
+                            'item': item
+                        }
+                    })
+                    try:
+                        await self.push_data(item, intent)
+                    except:
+                        blade_logger.exception(
+                            "An error occured pushing data"
+                        )
+            except:
+                blade_logger.exception("An error occured while retrieving data")
         except:
-            blade_logger.exception('An error occured while loading {}'.format(scraping_module_name))
-        finally:
-            async for item in scraper_instance:
-                blade_logger.info('found new data', extra={
-                    'printonly': {
-                        'item': item
-                    }
-                })
-                try:
-                    await self.push_data(item)
-                except:
-                    logging.exception('An error occured pushing data')
+            blade_logger.exception(
+                "An error occured while loading {}".format(scraping_module_name)
+            )
+        
    
-    async def push_data(self, data): # CANNOT FAIL
+    async def push_data(self, data:dict, intent:dict): # CANNOT FAIL
         """
         Pushing data should never be blocking
 
         May propagate unreachable to the orchestrator
             multiple strategies possibles:
-                - [CHOOSEN] drop de data
+                - [CHOOSEN] drop the data
                 - [COMPLEX] hold the data until capability 
         """
         blade_logger.info('pushing data')
-        target = self.intent['params']['target']
+        target = intent['params']['target']
         # Assuming that 'data' is a dictionary that can be turned into JSON
         try:
             async with ClientSession() as session:

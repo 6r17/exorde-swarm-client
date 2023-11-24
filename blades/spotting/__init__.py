@@ -5,6 +5,7 @@ on it
 """
 from aiohttp import web
 import asyncio
+import logging
 
 blade_logger = logging.getLogger('blade')
 
@@ -16,18 +17,19 @@ lock = asyncio.Lock()
 MAX_SIZE = 10
 
 async def process_data(data):
-    blade_logger.info("Processing data:", data)
+    blade_logger.info(f"Processing data: {data}")
     await asyncio.sleep(1)  # Simulate some processing time
     blade_logger.info('Done processing data')
 
 async def add_data(request):
     """Scrapers push items trough this endpoint"""
     data = await request.text()
-    
+    blade_logger.info('Received new data')
+
     async with lock:
         shared_data['items'].append(data)
         data_size = len(shared_data['items'])
-        
+
         # If the list reaches MAX_SIZE, trigger processing
         if data_size >= MAX_SIZE:
             # Copy the data for processing and clear the shared state
@@ -42,4 +44,10 @@ async def add_data(request):
     return web.Response(text="Data added.")
 
 app = web.Application()
+
+async def spotting_on_init(app):
+    blade_logger.info("Hello World !")
+
+app.on_startup.append(spotting_on_init)
+
 app.router.add_post('/push', add_data)

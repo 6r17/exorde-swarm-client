@@ -1,8 +1,8 @@
 from aiohttp import web, ClientSession, UnixConnector
-from asyncio import gather, create_task, Lock, CancelledError
+from asyncio import gather, create_task, CancelledError, sleep, IncompleteReadError
 import logging
 import json
-import os
+
 
 blade_logger = logging.getLogger('blade')
 
@@ -26,7 +26,7 @@ class AsyncAggregator:
 
         d = data['_details']
         await self.broadcast(data['_details'])
-        self.state = deep_merge(self.state, json.loads(data['_details']))
+        self.state = deep_merge(self.state, data['_details'])
 
     async def broadcast(self, message):
         for ws in self._listeners:
@@ -45,7 +45,7 @@ async def websocket_handler(request):
     await ws.prepare(request)
     request.app['log_aggregator'].add_listener(ws)
     try:
-        async for msg in ws:
+        async for __msg__ in ws:
             pass
     finally:
         request.app['log_aggregator'].remove_listener(ws)
@@ -59,7 +59,7 @@ async def handle_logs(request):
     return web.Response(text='Log received')
 
 
-async def get_containers_ids() -> list[str]:
+async def get_containers_ids() -> dict[str, str]:
     """Retrieve container_ids that have label "exorde:monitor"""
     url = "http://localhost/containers/json"
     async with ClientSession(connector=UnixConnector(path='/var/run/docker.sock')) as session:
@@ -70,30 +70,37 @@ async def get_containers_ids() -> list[str]:
                 for container in containers if 'exorde' in container['Labels'] and container['Labels']['exorde'] == 'monitor'
             }
 
+
 async def get_logs(session, container_id, container_names, log_aggregator):
     """Processes the log stream from a Docker container."""
     url = f"http://localhost/containers/{container_id}/logs?stdout=1&stderr=1&ansi=false&follow=1"
-    async with session.get(url) as response:
-        blade_logger.info(f"consuming : {url} ({container_names})")
+    while True:  # Adding a loop to continuously try connecting
         try:
-            while True:
-                try:
-                    header = await response.content.readexactly(8)
-                except:
-                    pass
-                finally:
-                    stream_type, length = header[0], int.from_bytes(header[4:], "big")
-                    message = await response.content.readexactly(length)
+            async with session.get(url) as response:
+                blade_logger.info(f"Waiting logs for : {url} ({container_names})")
+                while True:
                     try:
-                        data = json.loads(message.decode())
-                        if data:
-                            await log_aggregator.push(data)
-                    except json.JSONDecodeError:
-                        pass
+                        header = await response.content.readexactly(8)
+                        if not header:  # Check for EOF
+                            break
+                        __stream_type__, length = header[0], int.from_bytes(header[4:], "big")
+                        message = await response.content.readexactly(length)
+                        if not message:  # Check for EOF
+                            break
+                        try:
+                            data = json.loads(message.decode())
+                            if data:
+                                await log_aggregator.push(data)
+                        except json.JSONDecodeError:
+                            pass
+                    except IncompleteReadError:  # Handle incomplete read (EOF)
+                        break
         except CancelledError:
-            blade_logger.info("Log stream cancelled")
+            blade_logger.info("Log stream cancelled for container: %s", container_id)
+            break  # Exit loop if cancelled
         except Exception as e:
             blade_logger.exception("An error occurred: %s", str(e))
+        await sleep(2)  # Wait before retrying
 
 async def start_background_tasks(app):
     blade_logger.info("Starting docker log collection")

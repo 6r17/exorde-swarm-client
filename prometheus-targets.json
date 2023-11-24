@@ -1,0 +1,33 @@
+[
+  {
+    "labels": {
+      "job": "orchestrator"
+    },
+    "targets": ["orchestrator:8000"]
+  },
+  {
+    "labels": {
+      "job": "spotting"
+    },
+    "targets": ["spotting:8001"]
+  },
+  {
+    "labels": {
+      "job": "scraper_one"
+    },
+    "targets": ["scraper_one:8002"]
+  },
+  {
+    "labels": {
+      "job": "scraper_two"
+    },
+    "targets": ["scraper_two:8003"]
+  },
+  {
+    "labels": {
+      "job": "monitor"
+    },
+    "targets": ["monitor:8004"]
+  }
+]
+

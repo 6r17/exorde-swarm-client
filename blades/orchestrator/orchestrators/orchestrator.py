@@ -9,7 +9,7 @@ class OrchestratorIntentParameters:
     """Does-Nothing"""
     pass
 
-def orchestrator_orchestration(blade, capabilities: dict[str, str], __topology__: dict) -> Intent:
+async def orchestrator_orchestration(blade, capabilities: dict[str, str], __topology__: dict, __selfblade__) -> Intent:
     """The orchestrator orchestrator has no special implementation on static top"""
     return Intent(
         id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),

@@ -40,14 +40,11 @@ changes.
 
 They are tailored for different types of nodes (scraper, spotting, quality)
 and allow us to re-configure the node at runtime.
-
 """
 async def think(app) -> dict[str, Intent]: # itent.id : intent
     """
     Low Level `Brain`:
-
         Generate an index of intents for every node
-
     """
     # get the version map (versioning.py)
     capabilities_list: list[RepositoryVersion] = await app['version_manager'].get_latest_valid_tags_for_all_repos()
@@ -56,23 +53,30 @@ async def think(app) -> dict[str, Intent]: # itent.id : intent
         for repository_versioning in capabilities_list
     }
 
-    def resolve(node: dict) -> Union[Intent, None]:
+    async def resolve(node: dict) -> Union[Intent, None]:
         """
-        intents are results of orchestration rules that we define for each node.
+        Intents are results of orchestration rules that we define for each node.
         """
         orchestrator = ORCHESTRATORS.get(node['blade'], None)
         if orchestrator: # skip for undefined orchestration
-            return orchestrator(node, capabilities, app['topology'])
+            return await orchestrator(node, capabilities, app['topology'], app['blade'])
 
     # generate intent list
     result: dict[str, Intent] = {} # id : intent(id,...)
     for node in app['topology']['blades']:
         new_intent: Union[Intent, None] = None
         try:
-            new_intent = resolve(node)
+            new_intent = await resolve(node)
         except:
+            """
+            There is no fallback strategy in case we are failing to create 
+            Intents ATM.
+            """
             blade_logger.exception(
-                "An error occured creating an intent for {}".format(node)
+                "An error occured creating an intent for {}".format(node),
+                extra={
+                    'logtest': { 'capabilities': capabilities }
+                }
             )
         finally:
             if new_intent: # intents can return None to skip silently (bad)
@@ -105,8 +109,6 @@ note :
             the process
 """
 
-
-
 async def commit_intent(intent: Intent):
     async with ClientSession(timeout=ClientTimeout(1)) as session:
         host = 'http://' + intent.host
@@ -116,6 +118,7 @@ async def commit_intent(intent: Intent):
         except:
             # the blade is non responsive which can happen atm when the module pip installs
             blade_logger.warning('Could not reach {}'.format(host))
+
 
 async def orchestrate(app):
     """
@@ -146,13 +149,21 @@ async def orchestrate(app):
 
 async def orchestrator_on_init(app):
     # orchestrate is a background task that runs forever
-    app['orchestrate'] = app.loop.create_task(orchestrate(app))
+    try:
+        await versioning_on_init(app)
+        app['orchestrate'] = app.loop.create_task(orchestrate(app))
+    except Exception as err:
+        blade_logger.exception(
+            "Critical occured initialing versioning, cannot start the client"
+        )
+        await asyncio.sleep(200)
+        raise(err)
 
 async def orchestrator_on_cleanup(app):
     app['orchestrate'].cancel()
     await app['orchestrate']
 
+
 app = web.Application()
 app.on_startup.append(orchestrator_on_init)
-app.on_startup.append(versioning_on_init)
 app.on_cleanup.append(orchestrator_on_cleanup)

@@ -7,7 +7,6 @@ specific task.
 
 import dataclasses
 import time
-import os
 import argparse
 import asyncio
 from aiohttp import web
@@ -110,8 +109,10 @@ class JsonFormatter(logging.Formatter):
 
         So this is a logging router
 
-        - LogTest compatible (custom logging state) (logtest field, should not be sent to OVH)
-        - should be OVH format compatible (base_log_record + _details) (not implemented atm)
+        - LogTest compatible (custom logging state) (logtest field, should not
+                                                     be sent to OVH)
+        - should be OVH format compatible (base_log_record + _details) (not 
+                                                                        impl atm)
         - with a PrintOnly field (print only in the logs)
 
         This does not handle splitting out the logs appropriately ATM and would
@@ -123,13 +124,8 @@ class JsonFormatter(logging.Formatter):
         so OVH is ignored atm in favor of Grafana & Prom that do not rely on 
         logs, so no additional logstream is required.
         """
-        """
-        Logtests are 
-        """
-        try:
-            logtest = record.logtest
-        except:
-            logtest = {}
+        logtest:dict = getattr(record, 'logtest', {})
+
         if record.exc_info:
             # does not save the error
             logtest['exception'] = self.formatException(record.exc_info)
@@ -140,28 +136,14 @@ class JsonFormatter(logging.Formatter):
             "timestamp": time.time(),
             "level": self.LEVEL_MAP.get(record.levelno, 1),
             "_details": {}, # reserved for OVH
+            "logtest": logtest
         }
-
 
         printonly = getattr(record, 'printonly', None)
         if printonly:
             base_log_record['printonly'] = printonly
 
-
-        """
-        If the key is not provided, the logger assumes that the user has NOT
-        expressed OVH formating but only JLOG.
-        """
-        ovh_log_api_key = os.getenv('OVH_LOG_API_KEY', None)
-        if ovh_log_api_key:
-            ovh_extended_log_record = {
-                "version": "1.1",
-                "short_message": "",
-                "line": record.lineno,
-                "X-OVH-TOKEN": ovh_log_api_key,
-            }
-            base_log_record.update(ovh_extended_log_record)
-        return json.dumps(base_log_record)
+        return json.dumps(base_log_record, default=dataclass_to_dict)
 
 
 if __name__ == '__main__':

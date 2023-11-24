@@ -128,8 +128,6 @@ async def get_keywords():
     return FALLBACK_DEFAULT_LIST
 
 
-
-
 def create_topic_lang_fetcher(refresh_frequency: int = 3600):
     url: str = "https://raw.githubusercontent.com/exorde-labs/TestnetProtocol/main/targets/topic_lang_keywords.json"
     cached_data: Optional[Dict[str, dict[str, list[str]]]] = None
@@ -180,7 +178,7 @@ topic_lang_fetcher = create_topic_lang_fetcher()
 
 
 async def choose_translated_keyword(
-    module_name: str, module_configuration: ScraperConfiguration
+    module_path: str, scraper_configuration: ScraperConfiguration
 ):
     """
     New keyword_choose alg takes into account the module language and translated
@@ -193,9 +191,8 @@ async def choose_translated_keyword(
     """retrieve the topic lang data"""
     try:
         topic_lang: dict[str, dict[str, list[str]]] = await topic_lang_fetcher()
-    
         """Get a random topic"""
-        # create a list of topics
+        # retrieve list of topics
         topics: list[str] = list(topic_lang.keys())
         assert len(topics), "Retrieved topics are empty"
         choosed_topic = random.choice(topics)
@@ -205,36 +202,46 @@ async def choose_translated_keyword(
         )
         return random.choice(FALLBACK_DEFAULT_LIST)
     try:
-        # retrieve available languages for the specified topic
+        """
+        retrieve available languages for the specified topic,  filter out topics
+        with empty translations 
+        """
         topic_languages = [
             lang for lang in list(
                 topic_lang[choosed_topic].keys()
             ) if len(topic_lang[choosed_topic][lang])
-        ] # filter out topics with empty translations
+        ]
         assert len(topic_languages), "Topic has no translation"
 
-        # retrieve available languages for the specified module_name
-        module_languages = module_configuration.lang_map[module_name]
+        """retrieve available languages for the specified module_path"""
+        # lang_map[module_hash]
+        def extract_project_name(url):
+            return url.rstrip('/').split('/')[-1]
+        module_hash = extract_project_name(module_path) 
+        module_languages = scraper_configuration.lang_map[module_hash]
         assert len(module_languages), "Scraper module does not support topic-lang"
 
-        """
-        choose_language can be set to `all` in which case every language should
-        be considered
-        """
         if module_languages == ["all"]:
-            module_languages = topic_languages
+            """
+            module language compat can be set to `all` in which case every 
+            language is considered
+            """
+            intercompatible_languages = topic_languages
+        else:
+            """Determin languages that are scraper compatible and translated"""
+            intercompatible_languages = [
+                lang for lang in topic_languages if lang in module_languages
+            ]
 
-        # determin languages that are scraper compatible and translated
-        intercompatible_languages = [
-            lang for lang in topic_languages if lang in module_languages
-        ]
         # if there is no match we fall back using the topic
         assert len(intercompatible_languages), "No language intercompatible"
 
         # else we have a translated keyword by choosing an item in the list
         return random.choice(intercompatible_languages)
     except (KeyError, AssertionError):
-        blade_logger.exception("while using topic-lang algorithm, using fall-back")
+        blade_logger.exception(
+            "Error while using topic-lang algorithm, using topic"
+        )
         # if there is no match we fall back using the topic
         return choosed_topic
 
@@ -252,12 +259,12 @@ Notes:
 """
 
 async def choose_keyword(
-    module_name: str,
-    module_configuration: ScraperConfiguration,
+    module_path: str,
+    scraper_configuration: ScraperConfiguration,
 ) -> Tuple[str, str]:
     """Feature-flipped with a threshold cursor"""
     # cursor
-    algorithm_choose_cursor = module_configuration.new_keyword_alg
+    algorithm_choose_cursor = scraper_configuration.new_keyword_alg
     # number generation
     random_number = random.randint(0, 99)
     alg = None
@@ -273,10 +280,11 @@ async def choose_keyword(
     if random_number <= algorithm_choose_cursor:
         try:
             result = await choose_translated_keyword(
-                module_name, module_configuration
+                module_path, scraper_configuration
             )
             alg = 'new'
-        except Exception:
+        except:
+            blade_logger.exception("An unhandled error occured in choose_translated_keyword")
             result = await default_choose_keyword()
             alg = 'old'
     result = await default_choose_keyword()

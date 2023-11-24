@@ -53,15 +53,19 @@ from enum import Enum
 from asyncdb import AsyncDB
 from typing import Optional
 
-from orchestrators.scraping.scraper_configuration import get_scrapers_configuration, ScraperConfiguration
+from .orchestrators.scraping.scraper_configuration import (
+    get_scrapers_configuration, ScraperConfiguration
+)
 
 blade_logger = logging.getLogger('blade')
+
 
 class Mark(Enum):
     """
     `mark` is an internal `label` system differenciated from online labels.
     """
     DEFFECTIVE = 0
+
 
 @dataclass
 class Commit:
@@ -83,17 +87,21 @@ class Repository:
     tags: list[Tag]
 
 
-async def get_repository_versioning(repo: str, semaphore) -> Repository:
+async def get_repository_versioning(repo: str, semaphore, session) -> Repository:
     """Retrieves a repository available tags ; repo is owner/path"""
-    async def fetch_json(url: str):
-        async with aiohttp.ClientSession() as session:
+    blade_logger.info(f"Retrieving metadata for {repo}")
+    async def fetch_json(url: str, session):
             async with session.get(url) as response:
                 response.raise_for_status()
+                await asyncio.sleep(1)
                 return await response.json()
+
 
     tags_url = f"https://api.github.com/repos/{repo}/tags"
     async with semaphore:
-        tags = await fetch_json(tags_url)
+        tags = await fetch_json(tags_url, session)
+
+    blade_logger.info(f"Retrieved metadata for {repo}")
 
     # Filter out pre-releases
     valid_tags = [
@@ -112,6 +120,9 @@ async def get_repository_versioning(repo: str, semaphore) -> Repository:
         ) for tag in valid_tags 
     ]
 
+    blade_logger.info(
+        f"{len(tags)} tag{'s' if len(tags) != 1 else ''} defined at {repo}"
+    )
 
     return Repository(path=repo, tags=tags)
 
@@ -155,7 +166,9 @@ class VersionManager:
                 );
             ''')
 
-            blade_logger.info('repositories table creation : {}, {}'.format(result, error))
+            blade_logger.info('repositories table creation : {}, {}'.format(
+                result, error
+            ))
 
             result, error = await conn.execute('''
                 CREATE TABLE IF NOT EXISTS tags (
@@ -170,7 +183,9 @@ class VersionManager:
                 );
             ''')
 
-            blade_logger.info('tags table creation -> {}, {}'.format(result, error))
+            blade_logger.info('tags table creation -> {}, {}'.format(
+                result, error
+            ))
 
             result, error = await conn.execute('''
                 CREATE TABLE IF NOT EXISTS marks (
@@ -182,34 +197,29 @@ class VersionManager:
                 );
             ''')
 
-            blade_logger.info('marks table creation : {}, {}'.format(result, error))
+            blade_logger.info('marks table creation : {}, {}'.format(
+                result, error
+            ))
 
     async def sync(self, cache=True):
         """Synchronize repository tags with online version."""
         synchronize_id = time.time() # sync is not a parallel event
-        def synclogtest(logtest):
-            nonlocal synchronize_id
-            return {
-                'logtest': { # key for logtest
-                    'version_syncronization': { # identify this feature
-                        synchronize_id: logtest 
-                    }
-                }
-            }
-        blade_logger.info('synchronizing repositories', extra=synclogtest({}))
 
-        #repositories defined in the sync method permit them to be synced
+        blade_logger.info('Downloading modules versions', extra={
+            "saveat": f"logtest.version_synchronization.{synchronize_id}"
+        })
+
         repositories: list[str] = [
             "exorde-labs/exorde-swarm-client",
         ] # includes blade base
         # and add every repository listed by the scraper_configuration 
         try:
-            scraping_configuration: ScraperConfiguration = get_scrapers_configuration()
+            scraping_configuration: ScraperConfiguration = await get_scrapers_configuration()
         except:
             blade_logger.exception(
-                "Error retrieving scraping configuration", extra=synclogtest({
-
-                })
+                "Error retrieving scraping configuration", extra={
+                    "saveat": f"logtest.version_synchronization.{synchronize_id}"
+                }
             )
             return
 
@@ -217,22 +227,39 @@ class VersionManager:
         # todo add scrapers listed by the user (morph scrapers into a dict)
         # repositories.extend(blade['static_cluster_parameters']['scrapers'])
         self.repositories = repositories
+        blade_logger.info(
+            "Created list of repositories to synchronize from", {
+                "logtest": {
+                    "version_synchronization": {
+                        synchronize_id: {
+                            "repositories": repositories
+                        }
+                    }
+                }
+            }
+        )
 
         # To run multiple tasks using asyncio.gather but in a way that 
         # doesn't bombard an endpoint too harshly,
-        semaphore = asyncio.Semaphore(2)  # Allow 2 concurrent tasks
+        semaphore = asyncio.Semaphore(1)  # Number of concurrent tasks
 
         # Retrieve tags from repositories that needs an update
         async with await self.db.connection() as conn:
             if cache:
+                """Use cached repositories"""
                 # Determin peremption time
-                threshold_time = datetime.utcnow() - timedelta(minutes=self.github_cache_threshold_minutes)
-                # Convert threshold_time to a format suitable for SQLite comparison
-                formatted_threshold_time = threshold_time.strftime('%Y-%m-%d %H:%M:%S')
+                threshold_time = datetime.utcnow() - timedelta(
+                    minutes=self.github_cache_threshold_minutes
+                )
+                # Convert threshold_time to a format suitable for SQLite 
+                # comparison
+                formatted_threshold_time = threshold_time.strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
 
                 # Get repositories that need updating based on the threshold
                 (repos_to_update, __error__) = await conn.query(
-                    'SELECT path FROM repositories WHERE last_online_retrieval < :formated_threshold_time',
+                    "SELECT path FROM repositories WHERE last_online_retrieval < :formated_threshold_time",
                     formated_threshold_time=formatted_threshold_time
                 )
 
@@ -240,16 +267,22 @@ class VersionManager:
                 repos_to_sync_paths = [row[0] for row in repos_to_update]
 
                 # Filter self.repositories based on repos_to_sync_paths
-                repositories_to_sync = [repo for repo in self.repositories if repo in repos_to_sync_paths]
-
-                # Gather repository data asynchronously for repositories that need updating
-                online_repositories_info: list[Repository] = await asyncio.gather(
-                    *[get_repository_versioning(repo, semaphore) for repo in repositories_to_sync]
-                )
+                repositories_to_sync = [
+                    repo for repo in self.repositories if repo in repos_to_sync_paths
+                ]
             else:
+                """Retrieve every repository"""
+                repositories_to_sync = self.repositories
+
+            blade_logger.info(
+                f"About to download metadata from {len(repositories_to_sync)} repositories"
+            )
+            # Gather repository data asynchronously for repositories that need updating
+            async with aiohttp.ClientSession() as session:
                 online_repositories_info: list[Repository] = await asyncio.gather(
-                    *[get_repository_versioning(repo, semaphore) for repo in self.repositories]
+                    *[get_repository_versioning(repo, semaphore, session) for repo in repositories_to_sync]
                 )
+            blade_logger.info(f"Repositories metadata downloaded")
 
             inserted_repositories = [
                 (repository.path,) for repository in online_repositories_info
@@ -388,7 +421,9 @@ class VersionManager:
             if mark_error:
                 blade_logger.error(f"Error marking tag: {mark_error}")
             else:
-                blade_logger.info(f"Tag {tag_name} marked as {mark} for {repository_path}")
+                blade_logger.info(
+                    f"Tag {tag_name} marked as {mark} for {repository_path}"
+                )
 
     async def delete_mark_from_tag(self, tag_name: str, repository_path: str, mark: Mark):
         """Delete a mark from a tag."""
@@ -409,24 +444,29 @@ class VersionManager:
 
             # Check if tag exists
             if not tag_query_result:
-                blade_logger.error(f"No tag found for {repository_path} with name {tag_name} to unmark")
+                blade_logger.error(
+                    f"No tag found for {repository_path} with name {tag_name} to unmark"
+                )
                 return
 
             tag_id = tag_query_result[0][0]
 
             # Delete the mark for this tag.
-            delete_mark_result, delete_mark_error = await conn.execute(
+            __delete_mark_result__, delete_mark_error = await conn.execute(
                 """
                 DELETE FROM marks
                 WHERE tag_id = :tag_id AND mark = :mark_value;
                 """,
-                tag_id=tag_id, mark_value=mark.value
+                tag_id=tag_id, 
+                mark_value=mark.value
             )
 
             if delete_mark_error:
                 blade_logger.info(f"Error deleting mark from tag: {delete_mark_error}")
             else:
-                blade_logger.info(f"Mark deleted from tag {tag_name} for repository {repository_path}")
+                blade_logger.info(
+                    f"Mark deleted from tag {tag_name} for repository {repository_path}"
+                )
 
     async def get_all_repositories(self):
         async with await self.db.connection() as conn:
@@ -441,6 +481,9 @@ async def versioning_on_init(app):
     app['version_manager'] = VersionManager(app['blade'])
     await app['version_manager'].set_up()
     try:
-        await app['version_manager'].sync(cache=False)
-    except:
-        blade_logger.exception('an error occured while synchronizing repositories')
+        await app['version_manager'].sync(cache=True)
+    except Exception as error:
+        blade_logger.exception(
+            "an error occured while downloading modules metadata"
+        )
+        raise (error)

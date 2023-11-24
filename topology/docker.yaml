@@ -8,13 +8,14 @@ blades: # versions are handled dynamicly
       focus: # orchestrator will only scrap using those modules
         - exorde-labs/rss007d0675444aa13fc
       orchestrator_interval_in_seconds: 10
+      orchestrator_scraper_interval: 10
       github_cache_threshold_minutes: 10
       github_app_id: 423653
       github_private_key: github.pem
       database_provider: sqlite
       db:
         driver: sqlite
-        database: orchestrator.sqlite
+        database: /data/orchestrator.sqlite
     host: orchestrator
     port: 8000
     venv: "./venvs/orchestrator"

@@ -24,7 +24,9 @@ from .weighted_choice import weighted_choice
 from ...intent import Intent
 
 import random
-from typing import Union
+from typing import Union, Callable
+
+from urllib.parse import urlparse
 
 blade_logger = logging.getLogger('blade')
 
@@ -66,15 +68,24 @@ async def choose_domain(weights: dict[str, float], *layers
     to provide incomplete weights and those are managed correctly
 
 """
-async def generate_focus_layer(blade, weights: dict[str, float]) -> dict[str, float]:
+async def generate_focus_layer(
+    blade, weights: dict[str, float]
+) -> dict[str, float]:
     """ returning an empty dict makes no change """
-    onlies: list[str] = blade['static_cluster_parameters']['focus']
-    return {k: 1.0 if k in onlies else 0.0 for k, __v__ in weights.items()}
+    try:
+        onlies: list[str] = blade['static_cluster_parameters']['focus']
+        return {
+            k: 1.0 if k in onlies else 0.0 for k, __v__ in weights.items()
+        }
+    except KeyError as error:
+        blade_logger.exception(
+            "An error occured while generating focus layer",
+            extra={
 
-"""
-
-"""
-
+            }
+        )
+        raise(error)
+   
 
 def get_blades_location(topology, blade_type: str) -> list[str]:
     """return a list hosts that match blade_type"""
@@ -99,22 +110,27 @@ class ScraperIntentParameters:
         - blade versioning (blade.py) which controls the blade's code
         - scraping versioning (scraper.py) which controls the scraper's code
     """
-    keyword: str # the keyword to scrap
     parameters: dict # regular buisness related parameters
     target: str # spotting host to send data to
     module: str # the scraping module to use
     version: str # the version of scraping module to use
 
+def get_owner_repo_from_github_url(url):
+    parsed_url = urlparse(url)
+    path = parsed_url.path.strip('/')
+    owner_repo = '/'.join(path.split('/')[:2])
+    return owner_repo
 
-async def scraping_orchestration(
-    blade, capabilities: dict[str, str], topology: dict
-) -> Union[None, Intent]:
+
+async def create_intent(
+    blade, capabilities: dict[str, str], topology: dict, self_blade
+) -> Intent:
     try:
-        scrapers_configuration = get_scrapers_configuration()
-    except:
+        scrapers_configuration = await get_scrapers_configuration()
+    except Exception as err:
         blade_logger.exception("Error retriving scrapers configuration")
-        return # having no scrapers_configuration available is a critical error
-               # do nothing for now but it does not resolve the situation
+        raise(err) # having no scrapers_configuration available is a critical error
+                   # do nothing for now but it does not resolve the situation
 
     # quota_layer: dict[str, float] = await generate_quota_layer(
     #     blade, counter
@@ -125,11 +141,14 @@ async def scraping_orchestration(
     # focus_layer is configured by user and allows him to focus on spsc scrapers
     try:
         focus_layer: dict[str, float] = await generate_focus_layer(
-            blade, scrapers_configuration.weights,
+            self_blade, scrapers_configuration.weights,
         )
     except:
         blade_logger.exception(
-            "Error while instanciating focus vector, ignoring feature"
+            "Error while instanciating focus vector, ignoring feature",
+            extra={
+                'logtest': blade
+            }
         )
         focus_layer = {}
 
@@ -137,23 +156,45 @@ async def scraping_orchestration(
         domain = await choose_domain(
             scrapers_configuration.weights, focus_layer
         )
-    except:
+    except Exception as err:
         blade_logger.exception(
             "Error while choosing_domain, skipping intent"
         )
-        return
+        raise(err)
 
-    # get the appropriate scraping module for `domain`, for now, the first [0] 
-    scraper_module:str = scrapers_configuration.enabled_modules[domain][0]
+    """get the appropriate scraping module for `domain`, for now, the first [0]"""
+    # in url format (eg: "https://github.com/owner/repo")
+    scraper_module: str = scrapers_configuration.enabled_modules[domain][0]
 
     # todo note : remove scrapers_configuration from choose_keyword
     # it is currently used for keyword_alg which is mistakenly part of
     # scrapers_conf
     [keyword, __keyword_alg__] = await choose_keyword(
-        scraper_module.__name__, scrapers_configuration
+        scraper_module, scrapers_configuration
     )
 
-    module = "exorde-labs/rss007d0675444aa13fc"
+    """Scraping parameters"""
+
+    generic_modules_parameters: dict[
+        str, Union[int, str, bool, dict]
+    ] = scrapers_configuration.generic_modules_parameters
+
+    specific_parameters: dict[
+        str, Union[int, str, bool, dict]
+    ] = scrapers_configuration.specific_modules_parameters.get(
+        scraper_module, {}
+    )
+    parameters: dict[str, Union[int, str, bool, dict]] = {
+        "url_parameters": {"keyword": keyword},
+        "keyword": keyword,
+    }
+    parameters.update(generic_modules_parameters)
+    parameters.update(specific_parameters)
+
+
+    # in `owner/repo` format
+    module = get_owner_repo_from_github_url(scraper_module) 
+    # hardlocked to exorde-labs
     return Intent[ScraperIntentParameters](
         id='{}:{}:{}'.format(time.time(), blade['host'], blade['port']),
         host='{}:{}'.format(blade['host'], blade['port']),
@@ -163,11 +204,71 @@ async def scraping_orchestration(
             module=module,
             version=capabilities[module],
             target='http://{}/push'.format(
-                random.choice(get_blades_location(topology, 'spotting'))
+                random.choice(
+                    get_blades_location(topology, 'spotting')
+                )
             ),
-            keyword=keyword,
-            parameters={
-
-            }
+            parameters=parameters
         )
     )
+
+@dataclass
+class CurrentIntent:
+    intent: Intent
+    at: float 
+
+
+def should_create_new_intent(
+    current_intent: Union[CurrentIntent, None]
+) -> bool:
+    if not current_intent:
+        return True
+    current_time:float = time.time()
+    if current_time - current_intent.at >= 10.0:
+        return True
+    return False
+
+class ShouldCreateNewIntentError(Exception):
+    """
+    SHOULD NOT HAPPEN : CHECK FOR NONE
+    `should_create_new_intent` did not trigger a intent creation and no intent
+    has been retrieved. This error should never happen. It means that both
+    `scraping_orchestration` and `should_create_new_intent` have forgot checking 
+    `None`.
+    """
+
+def create_scraping_orchestration() -> Callable:
+    """
+    Intents timing control, the orchestrator push intents every seconds, this
+    function allows us to use previous intents instead of creating new ones in
+    order to control at which rate the different scrapers should change their
+    configuration.
+    """
+    memory = {} # use balde['host'] to differenciate managed hosts
+    async def orchestrate(
+        blade, capabilities: dict[str, str], topology: dict, self_blade
+    ) -> Intent:
+        nonlocal memory
+
+        maybe_current_intent: Union[CurrentIntent, None] = memory.get(
+            blade['host'], None
+        )
+        intent: Intent
+        if not maybe_current_intent or should_create_new_intent(
+            maybe_current_intent
+        ):
+            """error is managed above and there is no fallback strategy ATM"""
+            intent = await create_intent(
+                blade, capabilities, topology, self_blade
+            )
+            return intent
+        else:
+            if maybe_current_intent:
+                current_intent: CurrentIntent = maybe_current_intent
+                intent = current_intent.intent
+                return intent
+        raise ShouldCreateNewIntentError
+
+    return orchestrate
+
+scraping_orchestration = create_scraping_orchestration()
