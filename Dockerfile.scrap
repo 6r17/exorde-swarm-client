@@ -1,0 +1,14 @@
+FROM blade as scraper_blade
+
+# Update and install dependencies
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y chromium chromium-driver xvfb \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/bin/chromedriver  /usr/local/bin/chromedriver
+
+RUN pip3.10 install --no-cache-dir --upgrade 'git+https://github.com/JustAnotherArchivist/snscrape.git'
+
+# set display port to avoid crash
+ENV DISPLAY=:99

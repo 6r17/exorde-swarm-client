@@ -1,0 +1,18 @@
+FROM blade as spotter_blade
+
+## INSTALL ALL MODELS
+COPY blades/spotting/install.py /exorde/exorde_install_models.py
+COPY blades/spotting/requirements.txt /exorde/requirements.txt
+
+WORKDIR /exorde
+
+RUN pip3.10 install -r /exorde/requirements.txt
+
+RUN python3.10 exorde_install_models.py \
+    && rm -rf /root/.cache/* \
+    && rm -rf /root/.local/cache/*
+RUN python3.10 -m spacy download en_core_web_trf \
+    && rm -rf /root/.cache/*
+
+## ENTRY POINT IS MAIN.PY
+ENV PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python

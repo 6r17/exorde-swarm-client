@@ -2,7 +2,9 @@ version: '3'
 
 services:
   orchestrator:
-    build: .
+    build:
+      context: .
+      dockerfile: ./Dockerfile
     restart: always
     working_dir: /app/
     command: python3.10 multi.py --as orchestrator --jlog -c topology/docker.yaml --novenv
@@ -13,7 +15,9 @@ services:
       exorde: monitor
 
   spotting:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.spot
     restart: always
     working_dir: /app/
     command: python3.10 multi.py --as spotting --jlog -c topology/docker.yaml --novenv
@@ -23,7 +27,9 @@ services:
       exorde: monitor
 
   scraper_one:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.scrap
     restart: always
     working_dir: /app/
     command: python3.10 multi.py --as scraper_one --jlog -c topology/docker.yaml --novenv
@@ -33,7 +39,9 @@ services:
       exorde: monitor
 
   scraper_two:
-    build: .
+    build:
+      context: .
+      dockerfile: ./Dockerfile.spot
     restart: always
     working_dir: /app/
     command: python3.10 multi.py --as scraper_two --jlog -c topology/docker.yaml --novenv
@@ -43,7 +51,9 @@ services:
       exorde: monitor
 
   monitor:
-    build: .
+    build:
+      context: .
+      dockerfile: ./Dockerfile
     restart: always
     working_dir: /app/
     command: python3.10 multi.py --as monitor -c topology/docker.yaml --novenv
@@ -52,28 +62,3 @@ services:
       - ./topology:/app/topology
     ports:
       - "8004:8004"
-
-  prometheus:
-    image: prom/prometheus:v2.33.1
-    volumes:
-      - ./prometheus.yaml:/etc/prometheus/prometheus.yml
-      - ./prometheus-targets.json:/etc/prometheus/prometheus-targets.json  # Adding the targets file
-      - ./prometheus_data:/prometheus
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.enable-lifecycle'
-    ports:
-      - '9090:9090'
-
-  grafana:
-    image: grafana/grafana:latest
-    environment:
-      GF_SECURITY_ADMIN_USER: 'admin'
-      GF_SECURITY_ADMIN_PASSWORD: 'admin'
-    volumes:
-      - ./grafana:/var/lib/grafana
-    depends_on:
-      - prometheus
-    ports:
-      - '3000:3000'

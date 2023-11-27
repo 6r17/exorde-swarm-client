@@ -7,6 +7,8 @@ from aiohttp import web
 import asyncio
 import logging
 
+from .spotting_process import spotting_process
+
 blade_logger = logging.getLogger('blade')
 
 # Shared state and lock
@@ -15,12 +17,6 @@ lock = asyncio.Lock()
 
 # Maximum size of the list before processing
 MAX_SIZE = 10
-
-async def process_data(data):
-    blade_logger.info(f"Processing data: {data}")
-    await asyncio.sleep(1)  # Simulate some processing time
-    blade_logger.info('Done processing data')
-
 async def add_data(request):
     """Scrapers push items trough this endpoint"""
     data = await request.text()
@@ -36,7 +32,7 @@ async def add_data(request):
             data_to_process = shared_data['items'].copy()
             shared_data['items'] = []
             # Run the data processing without holding the lock
-            asyncio.create_task(process_data(data_to_process))
+            asyncio.create_task(spotting_process(data_to_process))
             return web.Response(
                 text=f"Data added and processing triggered with {data_size} items."
             )
